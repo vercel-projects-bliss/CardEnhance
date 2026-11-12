@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "daemons": {
+    "heartbeat": {
+      "root": "worker/",
+      "entrypoint": "Dockerfile",
+      "instances": { "iad1": 1 },
+      "resources": { "requests": { "memory": "1Gi" } },
+      "livenessProbe": {
+        "httpGet": { "port": 1234, "path": "/health" },
+        "initialDelaySeconds": 5
+      }
+    }
+  }
+}
