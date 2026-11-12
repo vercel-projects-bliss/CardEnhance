@@ -95,3 +95,37 @@ export async function encodePng(image: ImageData): Promise<Blob> {
   if (!blob) throw new Error("PNG encode failed");
   return blob;
 }
+
+export async function previewBlob(image: ImageData, maxEdge = 360): Promise<Blob> {
+  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+  const w = Math.max(1, Math.round(image.width * scale));
+  const h = Math.max(1, Math.round(image.height * scale));
+  const canvas = typeof OffscreenCanvas !== "undefined"
+    ? new OffscreenCanvas(w, h)
+    : Object.assign(document.createElement("canvas"), { width: w, height: h });
+  const ctx = (canvas as OffscreenCanvas | HTMLCanvasElement).getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+  const srcCanvas = typeof OffscreenCanvas !== "undefined"
+    ? new OffscreenCanvas(image.width, image.height)
+    : Object.assign(document.createElement("canvas"), { width: image.width, height: image.height });
+  const sctx = (srcCanvas as OffscreenCanvas | HTMLCanvasElement).getContext("2d");
+  if (!sctx) throw new Error("Canvas unavailable");
+  (sctx as CanvasRenderingContext2D).putImageData(image, 0, 0);
+  (ctx as CanvasRenderingContext2D).imageSmoothingEnabled = true;
+  (ctx as CanvasRenderingContext2D).imageSmoothingQuality = "high";
+  (ctx as CanvasRenderingContext2D).drawImage(srcCanvas as CanvasImageSource, 0, 0, w, h);
+  if ("convertToBlob" in canvas) {
+    return (canvas as OffscreenCanvas).convertToBlob({ type: "image/jpeg", quality: 0.72 });
+  }
+  return new Promise((resolve, reject) => {
+    (canvas as HTMLCanvasElement).toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("preview blob failed"))),
+      "image/jpeg",
+      0.72,
+    );
+  });
+}
+
+export function revokeUrl(url?: string | null) {
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}

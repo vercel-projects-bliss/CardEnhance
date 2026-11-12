@@ -5,6 +5,7 @@ export type StudioSettings = {
   denoise: number;
   sharpen: number;
   contrast: number;
+  adaptive: boolean;
 };
 
 export const defaultStudioSettings: StudioSettings = {
@@ -14,7 +15,24 @@ export const defaultStudioSettings: StudioSettings = {
   denoise: 0.2,
   sharpen: 0.5,
   contrast: 0.08,
+  adaptive: true,
 };
+
+export type Rotation = 0 | 90 | 180 | 270;
+
+export type CardClass = "chrome_foil_front" | "matte_paper_front" | "card_back";
+
+export type AdaptiveStats = {
+  sharpness: number;
+  noiseFloor: number;
+  specularRatio: number;
+  dustSpikes: number;
+};
+
+export type QuadCorners = {
+  x: number;
+  y: number;
+}[];
 
 export type StoredCard = {
   id: string;
@@ -99,6 +117,15 @@ export type EnhanceAudit = {
   sharpnessAfter: number;
   sharpnessDelta: number;
   timestamp: string;
+  orientationDetected: Rotation;
+  orientationApplied: Rotation;
+  userRotation: Rotation;
+  cropQuad: QuadCorners | null;
+  cropMargin: number | null;
+  cardClass: CardClass;
+  adaptiveStats: AdaptiveStats | null;
+  chosenParams: StudioSettings;
+  isLandscape: boolean;
 };
 
 export type LocalScan = {
@@ -123,4 +150,16 @@ export type LocalScan = {
   metallicContrast?: number | null;
   processedAt?: string | null;
   settingsUsed?: StudioSettings | null;
+  sourceId?: string;
+  cardIndex?: number;
+  userRotation?: Rotation;
+  orientationDetected?: Rotation | null;
+  orientationApplied?: Rotation | null;
+  cropQuad?: QuadCorners | null;
+  cropMargin?: number | null;
+  cardClass?: CardClass | null;
+  adaptiveStats?: AdaptiveStats | null;
+  chosenParams?: StudioSettings | null;
+  isLandscape?: boolean;
+  previewUrl?: string;
 };

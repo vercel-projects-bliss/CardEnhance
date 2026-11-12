@@ -8,7 +8,7 @@
  * delta % = (after - before) / before * 100.
  */
 
-import type { StudioSettings } from "./types";
+import type { AdaptiveStats, CardClass, StudioSettings } from "./types";
 
 export const LONG_EDGE_CAP = 2200;
 
@@ -27,6 +27,15 @@ export type EnhanceResult = {
   sharpnessBefore: number;
   sharpnessAfter: number;
   sharpnessDelta: number;
+  cardClass?: CardClass;
+  adaptiveStats?: AdaptiveStats;
+  chosenParams?: StudioSettings;
+};
+
+export type EnhanceOptions = {
+  cardClass?: CardClass;
+  /** Fraction of min(width,height) at the border skipped by descratch (wear/crease protection). */
+  edgeProtect?: number;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -114,16 +123,20 @@ export function descratchPixels(
   w: number,
   h: number,
   strength: number,
+  edgeProtect = 0.05,
 ): Uint8ClampedArray {
   if (strength <= 0) return new Uint8ClampedArray(src);
   const out = new Uint8ClampedArray(src);
   const amt = clamp(strength, 0, 1);
+  const band = Math.max(1, Math.round(Math.min(w, h) * clamp(edgeProtect, 0, 0.2)));
   const rs: number[] = new Array(9);
   const gs: number[] = new Array(9);
   const bs: number[] = new Array(9);
 
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
+      // Leave a border band untouched so real corner wear, edge whitening, and creases stay visible.
+      if (x < band || y < band || x >= w - band || y >= h - band) continue;
       let k = 0;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -419,14 +432,19 @@ export async function processEnhance(
   height: number,
   settings: StudioSettings,
   scaleFn: ScaleFn = resampleBilinear,
+  options: EnhanceOptions = {},
 ): Promise<EnhanceResult> {
   const original = new Uint8ClampedArray(src);
   const chromeFoil = detectChromeFoil(original, width, height);
+  const cardClass = options.cardClass;
+  if (cardClass === "card_back") {
+    chromeFoil.isChromeFoil = false;
+  }
 
   let data: Uint8ClampedArray = new Uint8ClampedArray(original);
-  const canDescratch = settings.descratch > 0 && (!settings.descratchFoilOnly || chromeFoil.isChromeFoil);
-  if (canDescratch) {
-    data = descratchPixels(data, width, height, settings.descratch);
+  const descratchAmt = cardClass === "card_back" ? 0 : settings.descratch;
+  if (descratchAmt > 0 && (!settings.descratchFoilOnly || chromeFoil.isChromeFoil)) {
+    data = descratchPixels(data, width, height, descratchAmt, options.edgeProtect ?? 0.05);
   }
   if (settings.denoise > 0) {
     data = denoisePixels(data, width, height, settings.denoise);
@@ -461,5 +479,6 @@ export async function processEnhance(
     sharpnessBefore,
     sharpnessAfter,
     sharpnessDelta,
+    cardClass,
   };
 }

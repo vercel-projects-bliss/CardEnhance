@@ -1,19 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Upload } from "lucide-react";
+import { Check, ChevronDown, RotateCcw, RotateCw, Upload } from "lucide-react";
 import { SectionLabel } from "@/components/section-label";
 import { useStudioSettings } from "@/components/studio-settings";
-import { createEnhancePool } from "@/lib/enhance-pool";
+import { classLabel } from "@/lib/classify";
+import { createEnhancePool, defaultPoolSize } from "@/lib/enhance-pool";
 import {
   downloadBlob,
   encodePng,
   expandFiles,
   imageDataFromBlob,
+  previewBlob,
+  revokeUrl,
   zipBlobs,
 } from "@/lib/files";
 import { enhancePrepared, prepareScan } from "@/lib/process-scan";
-import type { EnhanceAudit, LocalScan, ScanStatus, StudioSettings } from "@/lib/types";
+import { composeRotation } from "@/lib/orient";
+import type { EnhanceAudit, LocalScan, Rotation, ScanStatus, StudioSettings } from "@/lib/types";
 
 const ACCEPT = "image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/zip,.zip";
 
@@ -42,6 +46,8 @@ export function StudioView() {
   const [compareOn, setCompareOn] = useState(false);
   const urlsRef = useRef<string[]>([]);
   const pixelsRef = useRef(new Map<string, PixelRecord>());
+  const scansRef = useRef<LocalScan[]>([]);
+  scansRef.current = scans;
 
   useEffect(() => {
     const urls = urlsRef;
@@ -127,7 +133,8 @@ export function StudioView() {
       ),
     );
 
-    const pool = createEnhancePool(2);
+    const poolSize = defaultPoolSize();
+    const pool = createEnhancePool(poolSize);
     let cursor = 0;
     const work = async () => {
       while (cursor < targets.length) {
@@ -137,6 +144,7 @@ export function StudioView() {
           pixels: pixelsRef.current,
           urls: urlsRef.current,
           patchScan,
+          hasChildren: (id) => scansRef.current.some((scan) => scan.sourceId === id && scan.id !== id),
           insertScans: (afterId, extras) => {
             setScans((current) => {
               const index = current.findIndex((scan) => scan.id === afterId);
@@ -149,10 +157,61 @@ export function StudioView() {
     };
 
     try {
-      await Promise.all([work(), work()]);
+      await Promise.all(Array.from({ length: poolSize }, () => work()));
       setActiveLabel("");
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Batch failed.");
+    } finally {
+      pool.terminate();
+      setRunning(false);
+    }
+  };
+
+  const rotateCards = async (ids: string[], delta: Rotation) => {
+    if (!ids.length || running) return;
+    const nextRot = new Map<string, Rotation>();
+    setScans((current) =>
+      current.map((scan) => {
+        if (!ids.includes(scan.id)) return scan;
+        const userRotation = composeRotation((scan.userRotation ?? 0) as Rotation, delta);
+        nextRot.set(scan.id, userRotation);
+        return { ...scan, userRotation, selected: true };
+      }),
+    );
+    const targets = scans.filter((scan) => ids.includes(scan.id)).map((scan) => ({
+      ...scan,
+      userRotation: nextRot.get(scan.id) ?? composeRotation((scan.userRotation ?? 0) as Rotation, delta),
+      selected: true,
+    }));
+    setRunning(true);
+    setNotice(null);
+    const poolSize = defaultPoolSize();
+    const pool = createEnhancePool(poolSize);
+    let cursor = 0;
+    const work = async () => {
+      while (cursor < targets.length) {
+        const target = targets[cursor++];
+        setActiveLabel(target.name);
+        await processOne(target, settings, pool, {
+          pixels: pixelsRef.current,
+          urls: urlsRef.current,
+          patchScan,
+          hasChildren: (id) => scansRef.current.some((scan) => scan.sourceId === id && scan.id !== id),
+          insertScans: (afterId, extras) => {
+            setScans((current) => {
+              const index = current.findIndex((scan) => scan.id === afterId);
+              if (index < 0) return [...current, ...extras];
+              return [...current.slice(0, index + 1), ...extras, ...current.slice(index + 1)];
+            });
+          },
+        });
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: poolSize }, () => work()));
+      setActiveLabel("");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Rotate failed.");
     } finally {
       pool.terminate();
       setRunning(false);
@@ -194,6 +253,15 @@ export function StudioView() {
         sharpnessAfter: scan.sharpnessAfter ?? 0,
         sharpnessDelta: scan.sharpnessDelta ?? 0,
         timestamp: scan.processedAt ?? new Date().toISOString(),
+        orientationDetected: (scan.orientationDetected ?? 0) as Rotation,
+        orientationApplied: (scan.orientationApplied ?? 0) as Rotation,
+        userRotation: (scan.userRotation ?? 0) as Rotation,
+        cropQuad: scan.cropQuad ?? null,
+        cropMargin: scan.cropMargin ?? null,
+        cardClass: scan.cardClass ?? "matte_paper_front",
+        adaptiveStats: scan.adaptiveStats ?? null,
+        chosenParams: scan.chosenParams ?? scan.settingsUsed ?? settings,
+        isLandscape: Boolean(scan.isLandscape),
       }));
     if (!rows.length) return;
     const body = JSON.stringify(
@@ -247,6 +315,41 @@ export function StudioView() {
             onClick={() => void runSelected()}
           >
             {running ? "Running…" : `Run on ${selected} selected`}
+          </button>
+          <button
+            type="button"
+            className={btn}
+            data-testid="batch-rotate-ccw"
+            disabled={!selected || running}
+            aria-label="Rotate selected 90 degrees counter-clockwise"
+            title="Rotate selected ↺ 90°"
+            onClick={() => void rotateCards(scans.filter((s) => s.selected).map((s) => s.id), 270)}
+          >
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            90°
+          </button>
+          <button
+            type="button"
+            className={btn}
+            data-testid="batch-rotate-cw"
+            disabled={!selected || running}
+            aria-label="Rotate selected 90 degrees clockwise"
+            title="Rotate selected ↻ 90°"
+            onClick={() => void rotateCards(scans.filter((s) => s.selected).map((s) => s.id), 90)}
+          >
+            <RotateCw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            90°
+          </button>
+          <button
+            type="button"
+            className={btn}
+            data-testid="batch-rotate-180"
+            disabled={!selected || running}
+            aria-label="Rotate selected 180 degrees"
+            title="Rotate selected 180°"
+            onClick={() => void rotateCards(scans.filter((s) => s.selected).map((s) => s.id), 180)}
+          >
+            180°
           </button>
         </div>
       </div>
@@ -302,7 +405,13 @@ export function StudioView() {
             </div>
           ) : null}
           {showCompare && focused ? <CompareView scan={focused} /> : null}
-          <ScanGrid scans={scans} onToggle={toggle} focusedId={focusedId} />
+          <ScanGrid
+            scans={scans}
+            onToggle={toggle}
+            focusedId={focusedId}
+            disabled={running}
+            onRotate={(id, delta) => void rotateCards([id], delta)}
+          />
         </div>
       </div>
     </div>
@@ -318,6 +427,7 @@ async function processOne(
     urls: string[];
     patchScan: (id: string, partial: Partial<LocalScan>) => void;
     insertScans: (afterId: string, extras: LocalScan[]) => void;
+    hasChildren: (id: string) => boolean;
   },
 ) {
   const rec = ctx.pixels.get(target.id);
@@ -329,12 +439,30 @@ async function processOne(
   try {
     ctx.patchScan(target.id, { status: "processing", stage: "detecting" });
     const source = await imageDataFromBlob(rec.source);
-    const prepared = await prepareScan(source, target.name);
+    const prepared = await prepareScan(source, target.name, (target.userRotation ?? 0) as Rotation);
     if (!prepared.length) throw new Error("No card detected");
 
+    ctx.patchScan(target.id, { stage: "enhancing", sourceId: target.sourceId ?? target.id });
+
+    // Re-running a previously split card should not spawn more tiles.
+    if (target.cardIndex != null && target.cardIndex > 0 && prepared[target.cardIndex]) {
+      await finishPrepared(
+        target.id,
+        target.name,
+        prepared[target.cardIndex],
+        settings,
+        pool,
+        ctx,
+        source.width,
+        source.height,
+      );
+      return;
+    }
+
     const first = prepared[0];
-    ctx.patchScan(target.id, { stage: "enhancing" });
     await finishPrepared(target.id, target.name, first, settings, pool, ctx, source.width, source.height);
+
+    if (ctx.hasChildren(target.id)) return;
 
     const extras: LocalScan[] = [];
     const extraPrepared: Array<{ id: string; card: (typeof prepared)[number] }> = [];
@@ -344,7 +472,6 @@ async function processOne(
       const preview = await encodePng(extra.image);
       const url = URL.createObjectURL(preview);
       ctx.urls.push(url);
-      ctx.pixels.set(id, { source: preview });
       extras.push({
         id,
         name: extra.filename,
@@ -358,8 +485,12 @@ async function processOne(
         status: "processing",
         stage: "enhancing",
         sharpnessDelta: null,
+        sourceId: target.sourceId ?? target.id,
+        cardIndex: extra.cardIndex,
+        userRotation: target.userRotation ?? 0,
       });
       extraPrepared.push({ id, card: extra });
+      ctx.pixels.set(id, { source: rec.source });
     }
     if (extras.length) ctx.insertScans(target.id, extras);
     for (const item of extraPrepared) {
@@ -397,10 +528,16 @@ async function finishPrepared(
   const existing = ctx.pixels.get(id);
   ctx.pixels.set(id, { source: existing?.source ?? rectified, processed: enhanced.blob });
 
+  const beforePreview = await previewBlob(prepared.image, 360);
+  const beforeUrl = URL.createObjectURL(beforePreview);
+  ctx.urls.push(beforeUrl);
+  revokeUrl(rectifiedUrl);
+
   ctx.patchScan(id, {
     name: filename,
-    url: enhanced.url,
-    originalUrl: rectifiedUrl,
+    url: enhanced.previewUrl || enhanced.url,
+    previewUrl: enhanced.previewUrl || enhanced.url,
+    originalUrl: beforeUrl,
     width: enhanced.width,
     height: enhanced.height,
     inputWidth: prepared.image.width,
@@ -417,6 +554,15 @@ async function finishPrepared(
     metallicContrast: enhanced.chromeFoil.metallicContrast,
     processedAt: new Date().toISOString(),
     settingsUsed: { ...settings },
+    orientationDetected: prepared.orientationDetected,
+    orientationApplied: prepared.orientationApplied,
+    cropQuad: prepared.cropQuad,
+    cropMargin: prepared.cropMargin,
+    isLandscape: prepared.isLandscape,
+    cardClass: enhanced.cardClass ?? null,
+    adaptiveStats: enhanced.adaptiveStats ?? null,
+    chosenParams: enhanced.chosenParams ?? null,
+    cardIndex: prepared.cardIndex,
   });
   void sourceW;
   void sourceH;
@@ -441,6 +587,24 @@ function InspectorRail({
     <aside className="panel flex flex-col gap-4 p-3">
       <SectionLabel index="01">ENHANCEMENT & EXPORT</SectionLabel>
 
+      <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-ink">
+        <input
+          type="checkbox"
+          data-testid="adaptive-toggle"
+          className="mt-0.5 accent-accent"
+          checked={settings.adaptive}
+          onChange={(event) => setSettings({ adaptive: event.target.checked })}
+        />
+        <span>
+          Adaptive mode (default on)
+          <span className="mt-0.5 block text-ink-subtle">
+            Measures sharpness, noise, specular highlights, and dust on each
+            scan and sets Descratch / Denoise / Sharpen / Contrast automatically.
+            Sliders below are a manual bias around those per-card values.
+          </span>
+        </span>
+      </label>
+
       <SliderField
         label="Scale"
         value={settings.scale}
@@ -459,7 +623,7 @@ function InspectorRail({
         step={0.01}
         format={(value) => value.toFixed(2)}
         onChange={(value) => setSettings({ descratch: value })}
-        help="Median-filters thin bright/dark scanner scratches before denoise."
+        help="Bias around the adaptive descratch, or the absolute amount when Adaptive is off. Edge wear is protected."
       />
       <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-ink-muted">
         <input
@@ -673,10 +837,14 @@ function ScanGrid({
   scans,
   onToggle,
   focusedId,
+  disabled,
+  onRotate,
 }: {
   scans: LocalScan[];
   onToggle: (id: string) => void;
   focusedId: string | null;
+  disabled: boolean;
+  onRotate: (id: string, delta: Rotation) => void;
 }) {
   if (scans.length === 0) {
     return (
@@ -690,9 +858,9 @@ function ScanGrid({
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <ul className="grid grid-cols-2 items-stretch gap-3 lg:grid-cols-4">
       {scans.map((scan) => {
-        const landscape = scan.width > scan.height;
+        const landscape = Boolean(scan.isLandscape);
         const dim =
           scan.status === "completed" &&
           (scan.inputWidth !== scan.width || scan.inputHeight !== scan.height)
@@ -703,70 +871,133 @@ function ScanGrid({
             ? "—"
             : `${scan.sharpnessDelta > 0 ? "+" : ""}${scan.sharpnessDelta.toFixed(1)}%`;
         const deltaPositive = (scan.sharpnessDelta ?? 0) > 0;
+        const params = scan.chosenParams;
 
         return (
-          <li key={scan.id} className={landscape ? "col-span-2" : "col-span-1"}>
-            <button
-              type="button"
-              onClick={() => onToggle(scan.id)}
-              aria-pressed={scan.selected}
-              data-focused={focusedId === scan.id ? "true" : "false"}
+          <li key={scan.id} className={landscape ? "col-span-2 flex" : "col-span-1 flex"}>
+            <div
               className={
                 scan.selected
-                  ? "glow-box flex w-full flex-col bg-surface text-left focus-visible:outline-none"
-                  : "flex w-full flex-col border border-border bg-surface text-left opacity-60 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  ? "glow-box flex w-full flex-col bg-surface text-left"
+                  : "flex w-full flex-col border border-border bg-surface text-left opacity-60 transition-opacity hover:opacity-90"
               }
             >
-              <div className="relative bg-background">
-                {scan.selected ? (
-                  <span className="absolute top-2 left-2 z-10 flex h-6 w-6 items-center justify-center bg-accent text-background">
-                    <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
-                    <span className="sr-only">Selected</span>
-                  </span>
-                ) : null}
-                {scan.isChromeFoil ? (
-                  <span
-                    data-testid="chrome-foil-badge"
-                    className="absolute top-2 right-2 z-10 border border-laser/60 bg-background/80 px-1.5 py-0.5 font-mono text-[9px] tracking-wide text-laser"
+              <button
+                type="button"
+                onClick={() => onToggle(scan.id)}
+                aria-pressed={scan.selected}
+                data-focused={focusedId === scan.id ? "true" : "false"}
+                className="flex w-full flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <div className="relative flex h-52 items-center justify-center bg-background">
+                  {scan.selected ? (
+                    <span className="absolute top-2 left-2 z-10 flex h-6 w-6 items-center justify-center bg-accent text-background">
+                      <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      <span className="sr-only">Selected</span>
+                    </span>
+                  ) : null}
+                  {scan.cardClass ? (
+                    <span
+                      data-testid="class-badge"
+                      data-class={scan.cardClass}
+                      className="absolute top-2 right-2 z-10 border border-laser/60 bg-background/80 px-1.5 py-0.5 font-mono text-[9px] tracking-wide text-laser"
+                    >
+                      {classLabel(scan.cardClass)}
+                    </span>
+                  ) : scan.isChromeFoil ? (
+                    <span
+                      data-testid="chrome-foil-badge"
+                      className="absolute top-2 right-2 z-10 border border-laser/60 bg-background/80 px-1.5 py-0.5 font-mono text-[9px] tracking-wide text-laser"
+                    >
+                      CHROME / FOIL
+                    </span>
+                  ) : null}
+                  {scan.status === "processing" || scan.status === "queued" ? (
+                    <span className="absolute bottom-2 left-2 z-10 border border-border bg-background/80 px-1.5 py-0.5 font-mono text-[9px] text-ink-muted">
+                      {scan.stage ?? scan.status}
+                    </span>
+                  ) : null}
+                  {scan.status === "failed" ? (
+                    <span className="absolute bottom-2 left-2 z-10 border border-border bg-background/80 px-1.5 py-0.5 font-mono text-[9px] text-ink">
+                      {scan.error ?? "failed"}
+                    </span>
+                  ) : null}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={scan.previewUrl || scan.url}
+                    alt={scan.name}
+                    className="max-h-52 max-w-full object-contain"
+                  />
+                </div>
+                <div className="border-t border-border px-2 py-2">
+                  <p className="truncate font-mono text-[11px] text-ink">{scan.name}</p>
+                  <p className="mt-0.5 font-mono text-[10px] text-ink-subtle">
+                    {dim}
+                    {landscape ? " · landscape" : ""}
+                    {scan.orientationApplied != null ? ` · ${scan.orientationApplied}°` : ""}
+                  </p>
+                  <p
+                    data-testid="sharpness-delta"
+                    className={
+                      deltaPositive
+                        ? "mt-0.5 font-mono text-[10px] text-laser"
+                        : "mt-0.5 font-mono text-[10px] text-ink-subtle"
+                    }
                   >
-                    CHROME / FOIL
-                  </span>
-                ) : null}
-                {scan.status === "processing" || scan.status === "queued" ? (
-                  <span className="absolute bottom-2 left-2 z-10 border border-border bg-background/80 px-1.5 py-0.5 font-mono text-[9px] text-ink-muted">
-                    {scan.stage ?? scan.status}
-                  </span>
-                ) : null}
-                {scan.status === "failed" ? (
-                  <span className="absolute bottom-2 left-2 z-10 border border-border bg-background/80 px-1.5 py-0.5 font-mono text-[9px] text-ink">
-                    {scan.error ?? "failed"}
-                  </span>
-                ) : null}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={scan.url}
-                  alt={scan.name}
-                  className="mx-auto max-h-64 w-full object-contain"
-                />
-              </div>
-              <div className="border-t border-border px-2 py-2">
-                <p className="truncate font-mono text-[11px] text-ink">{scan.name}</p>
-                <p className="mt-0.5 font-mono text-[10px] text-ink-subtle">
-                  {dim}
-                  {landscape ? " · landscape" : ""}
-                </p>
-                <p
-                  data-testid="sharpness-delta"
-                  className={
-                    deltaPositive
-                      ? "mt-0.5 font-mono text-[10px] text-laser"
-                      : "mt-0.5 font-mono text-[10px] text-ink-subtle"
-                  }
+                    sharpness Δ {delta}
+                  </p>
+                  {params ? (
+                    <p data-testid="chosen-params" className="mt-0.5 font-mono text-[9px] leading-snug text-ink-subtle">
+                      d{params.descratch.toFixed(2)} n{params.denoise.toFixed(2)} s{params.sharpen.toFixed(2)} c
+                      {params.contrast.toFixed(2)}
+                    </p>
+                  ) : null}
+                </div>
+              </button>
+              <div className="mt-auto flex border-t border-border">
+                <button
+                  type="button"
+                  className={btnGhost + " h-8 flex-1"}
+                  data-testid="rotate-ccw"
+                  disabled={disabled}
+                  aria-label={`Rotate ${scan.name} 90 degrees counter-clockwise`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRotate(scan.id, 270);
+                  }}
                 >
-                  sharpness Δ {delta}
-                </p>
+                  <RotateCcw className="h-3 w-3" strokeWidth={1.75} />
+                  90°
+                </button>
+                <button
+                  type="button"
+                  className={btnGhost + " h-8 flex-1"}
+                  data-testid="rotate-cw"
+                  disabled={disabled}
+                  aria-label={`Rotate ${scan.name} 90 degrees clockwise`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRotate(scan.id, 90);
+                  }}
+                >
+                  <RotateCw className="h-3 w-3" strokeWidth={1.75} />
+                  90°
+                </button>
+                <button
+                  type="button"
+                  className={btnGhost + " h-8 flex-1"}
+                  data-testid="rotate-180"
+                  disabled={disabled}
+                  aria-label={`Rotate ${scan.name} 180 degrees`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRotate(scan.id, 180);
+                  }}
+                >
+                  180°
+                </button>
               </div>
-            </button>
+            </div>
           </li>
         );
       })}
@@ -775,30 +1006,23 @@ function ScanGrid({
 }
 
 async function readScan(file: File): Promise<LocalScan> {
-  const url = URL.createObjectURL(file);
-  const size = await readSize(url);
+  const image = await imageDataFromBlob(file);
+  const preview = await previewBlob(image, 360);
+  const url = URL.createObjectURL(preview);
 
   return {
     id: crypto.randomUUID(),
     name: file.name,
     url,
     originalUrl: url,
-    width: size.width,
-    height: size.height,
-    inputWidth: size.width,
-    inputHeight: size.height,
+    previewUrl: url,
+    width: image.width,
+    height: image.height,
+    inputWidth: image.width,
+    inputHeight: image.height,
     selected: true,
     status: "idle",
     sharpnessDelta: null,
+    userRotation: 0,
   };
-}
-
-function readSize(url: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () =>
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => reject(new Error("image"));
-    image.src = url;
-  });
 }

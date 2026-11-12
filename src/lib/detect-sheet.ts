@@ -1,7 +1,7 @@
 import { detectCardBoxes, type YoloBox } from "./yolo";
-import { recoverQuad, warpPerspective, type Quad, type GeometryMethod } from "./geometry";
+import { recoverQuad, type Quad, type GeometryMethod } from "./geometry";
 import { cropRect } from "./image-ops";
-import { contourCropCard } from "./detect";
+import { deskewWithMargin, findOuterCardQuad, isValidCardAspect } from "./crop-quad";
 
 export type CardDetection = {
   cardIndex: number;
@@ -84,9 +84,8 @@ function contourBlobs(src: ImageData): Array<{ x: number; y: number; w: number; 
     const boxW = maxX - minX + 1;
     const boxH = maxY - minY + 1;
     const area = (boxW * boxH) / (sw * sh);
-    const aspect = boxW / Math.max(1, boxH);
-    const portrait = aspect >= 0.5 && aspect <= 0.9;
-    if (n < 40 || area < 0.02 || area > 0.7 || !portrait) continue;
+    if (n < 40 || area < 0.02) continue;
+    if (!isValidCardAspect(boxW, boxH)) continue;
     boxes.push({
       x: minX / scale,
       y: minY / scale,
@@ -95,6 +94,29 @@ function contourBlobs(src: ImageData): Array<{ x: number; y: number; w: number; 
     });
   }
   return boxes;
+}
+
+
+function nmsBoxes<T extends { x: number; y: number; w: number; h: number; score: number }>(
+  boxes: T[],
+  iouThresh = 0.55,
+): T[] {
+  const sorted = [...boxes].sort((a, b) => b.score - a.score);
+  const kept: T[] = [];
+  const iou = (a: T, b: T) => {
+    const x0 = Math.max(a.x, b.x);
+    const y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w);
+    const y1 = Math.min(a.y + a.h, b.y + b.h);
+    const inter = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+    const union = a.w * a.h + b.w * b.h - inter;
+    return union > 0 ? inter / union : 0;
+  };
+  for (const box of sorted) {
+    if (kept.some((k) => iou(k, box) > iouThresh)) continue;
+    kept.push(box);
+  }
+  return kept;
 }
 
 export async function detectCards(source: ImageData): Promise<CardDetection[]> {
@@ -109,56 +131,35 @@ export async function detectCards(source: ImageData): Promise<CardDetection[]> {
       method: (yolo.engine ?? "yolo") as CardDetection["detectorMethod"],
     }),
   );
-  const aspect = source.width / source.height;
-  const already =
-    (aspect >= 0.58 && aspect <= 0.85) || (aspect >= 1.18 && aspect <= 1.72);
-  if (already) {
-    const area = source.width * source.height;
-    const large = boxes.filter((b) => (b.w * b.h) / area >= 0.5);
-    boxes = large.length
-      ? [...large].sort((a, b) => b.w * b.h - a.w * a.h).slice(0, 1)
-      : [
-          {
-            x: 0,
-            y: 0,
-            w: source.width,
-            h: source.height,
-            score: 0.7,
-            method: "fullframe" as const,
-          },
-        ];
-  }
-  if (boxes.length < 2 && !already) {
-    const blobs = contourBlobs(source);
-    if (blobs.length > boxes.length) {
-      boxes = blobs.map((b) => ({ ...b, score: 0.55, method: "contour" as const }));
-    }
-  }
-  if (boxes.length === 0) {
-    if (already) {
-      boxes = [
-        {
-          x: 0,
-          y: 0,
-          w: source.width,
-          h: source.height,
-          score: 0.7,
-          method: "fullframe",
-        },
-      ];
-    } else {
-      const crop = contourCropCard(source);
-      boxes = [
-        {
-          x: 0,
-          y: 0,
-          w: crop.image.width === source.width ? source.width : source.width,
-          h: source.height,
-          score: crop.cropped ? 0.5 : 0.4,
-          method: crop.cropped ? "contour" : "fullframe",
-        },
-      ];
-    }
+  const blobs = contourBlobs(source).map((b) => ({
+    ...b,
+    score: 0.55,
+    method: "contour" as const,
+  }));
+  // Merge YOLO + contour candidates, then decide sheet vs single card.
+  // Never skip crop on a "already a card" area shortcut — even a 60–90%
+  // fill still needs outer-quad deskew and a uniform margin.
+  const merged = nmsBoxes([...boxes, ...blobs], 0.55);
+  const area = source.width * source.height;
+  const distinct = merged.filter((b) => {
+    const frac = (b.w * b.h) / area;
+    return frac >= 0.03 && frac <= 0.72 && isValidCardAspect(b.w, b.h);
+  });
+  if (distinct.length >= 2) {
+    boxes = distinct;
+  } else {
+    // Single-card scan: use the full frame so the outer-quad crop can find
+    // the true boundary. A tiny inner YOLO/nameplate box must not win.
+    boxes = [
+      {
+        x: 0,
+        y: 0,
+        w: source.width,
+        h: source.height,
+        score: 0.7,
+        method: "fullframe" as const,
+      },
+    ];
   }
 
   const ordered = sortReadingOrder(boxes);
@@ -179,20 +180,14 @@ export async function detectCards(source: ImageData): Promise<CardDetection[]> {
 }
 
 export function rectifyCard(source: ImageData, detection: CardDetection): ImageData {
-  const { box, polygon } = detection;
-  const avgW = (Math.hypot(polygon[1].x - polygon[0].x, polygon[1].y - polygon[0].y) +
-    Math.hypot(polygon[2].x - polygon[3].x, polygon[2].y - polygon[3].y)) / 2;
-  const avgH = (Math.hypot(polygon[3].x - polygon[0].x, polygon[3].y - polygon[0].y) +
-    Math.hypot(polygon[2].x - polygon[1].x, polygon[2].y - polygon[1].y)) / 2;
-  let dw = Math.round(avgW);
-  let dh = Math.round(avgH);
-  const aspect = dw / Math.max(1, dh);
-  if (aspect > 0.55 && aspect < 0.9) {
-    dh = Math.round(dw / 0.714);
-  }
-  dw = Math.max(80, Math.min(1800, dw));
-  dh = Math.max(110, Math.min(2500, dh));
-  const warped = warpPerspective(source, polygon, dw, dh);
-  if (warped) return warped;
-  return cropRect(source, box.x, box.y, box.x + box.w, box.y + box.h);
+  const pad = Math.round(Math.min(detection.box.w, detection.box.h) * 0.06);
+  const region = cropRect(
+    source,
+    detection.box.x - pad,
+    detection.box.y - pad,
+    detection.box.x + detection.box.w + pad,
+    detection.box.y + detection.box.h + pad,
+  );
+  const found = findOuterCardQuad(region);
+  return deskewWithMargin(region, found).image;
 }

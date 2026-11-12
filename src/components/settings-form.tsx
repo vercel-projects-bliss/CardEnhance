@@ -16,6 +16,22 @@ export function SettingsForm() {
       <section className="panel p-4">
         <SectionLabel index="01">ENHANCEMENT</SectionLabel>
         <div className="mt-4 flex flex-col gap-4">
+          <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-ink">
+            <input
+              type="checkbox"
+              data-testid="adaptive-toggle"
+              className="mt-0.5 accent-accent"
+              checked={settings.adaptive}
+              onChange={(event) => setSettings({ adaptive: event.target.checked })}
+            />
+            <span>
+              Adaptive mode (default on)
+              <span className="mt-0.5 block text-ink-subtle">
+                Per-card Descratch / Denoise / Sharpen / Contrast from measured
+                sharpness, noise, specular highlights, and dust. Sliders are a bias.
+              </span>
+            </span>
+          </label>
           <SliderRow
             label="Scale"
             value={settings.scale}

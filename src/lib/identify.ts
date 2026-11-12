@@ -59,119 +59,6 @@ const SETS: { name: string; re: RegExp }[] = [
   { name: "Chrome", re: /\bchrome\b/i },
 ];
 
-const FILE_HINTS: { test: RegExp; patch: Partial<CardIdentity> }[] = [
-  { test: /darby/, patch: { player: "Darby Allin", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /mina/, patch: { player: "Mina Shirakawa", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /dazzler/, patch: { set: "Dazzlers" } },
-  { test: /athena/, patch: { player: "Athena", set: "Pyro", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /hayter|jamie/, patch: { player: "Jamie Hayter", set: "Mighty Ones", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /willow|harley/, patch: { player: "Willow Nightingale & Harley Cameron", set: "Tag Teams", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /toni|timeline/, patch: { player: "Toni Storm", set: "Toni's Timeline", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /bret|hart/, patch: { player: "Bret Hart", set: "Chrome", manufacturer: "Topps", year: 2025 } },
-  { test: /chelsea/, patch: { player: "Chelsea Green", set: "Chrome", manufacturer: "Topps", year: 2025 } },
-  { test: /kofi/, patch: { player: "Kofi Kingston", set: "Prizm", manufacturer: "Panini", year: 2022, parallel: "Gold" } },
-  { test: /lola/, patch: { player: "Lola Vice", set: "Chrome", manufacturer: "Topps", year: 2025 } },
-  { test: /anna/, patch: { player: "Anna Jay", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /megan|penelope|bayne|ford/, patch: { player: "Megan Bayne & Penelope Ford", set: "Tag Teams", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /liv/, patch: { player: "Liv Morgan", manufacturer: "Topps", year: 2025 } },
-  { test: /kairi/, patch: { player: "Kairi Sane", manufacturer: "Topps", year: 2025 } },
-  { test: /xavier/, patch: { player: "Xavier Woods", manufacturer: "Topps", year: 2025 } },
-  { test: /alexa/, patch: { player: "Alexa Bliss", manufacturer: "Topps", year: 2025 } },
-  { test: /cope/, patch: { player: "Cope", set: "Deluxe", manufacturer: "Upper Deck", year: 2026 } },
-  { test: /michin|cosmic/, patch: { player: "Michin", set: "Cosmic Chrome", manufacturer: "Topps", year: 2026 } },
-  { test: /travis/, patch: { player: "Travis Scott", manufacturer: "Topps", year: 2025 } },
-  { test: /shawn/, patch: { player: "Shawn Michaels", set: "Prizm", manufacturer: "Panini", year: 2022 } },
-  { test: /prizm/, patch: { set: "Prizm", manufacturer: "Panini" } },
-  { test: /chrome/, patch: { set: "Chrome", manufacturer: "Topps" } },
-  { test: /pyro/, patch: { set: "Pyro" } },
-  { test: /mighty/, patch: { set: "Mighty Ones" } },
-  { test: /tag/, patch: { set: "Tag Teams" } },
-  { test: /famed/, patch: { set: "Famed Phantoms", manufacturer: "Topps", year: 2025 } },
-  { test: /festival/, patch: { set: "Festival Fury", manufacturer: "Topps", year: 2025 } },
-  { test: /astro/, patch: { set: "Astro Knights", manufacturer: "Topps", year: 2025 } },
-];
-
-const UD26 = { year: 2026 as const, manufacturer: "Upper Deck" };
-const TP25 = { year: 2025 as const, manufacturer: "Topps", set: "Chrome x Cactus Jack" };
-const TP26 = { year: 2026 as const, manufacturer: "Topps", set: "Cosmic Chrome" };
-const PN22 = { year: 2022 as const, manufacturer: "Panini", set: "Prizm" };
-
-/** Scanner dump Year-Manfucturer-Card-NNNN.jpg (typo in the lot filenames). */
-const DUMP: Record<string, Partial<CardIdentity>> = {
-  "0198": { player: "Darby Allin", ...UD26, side: "front" },
-  "0199": { player: "Megan Bayne & Penelope Ford", ...UD26, set: "Tag Teams", parallel: "Mat Red", side: "back" },
-  "0200": { player: "Megan Bayne & Penelope Ford", ...UD26, set: "Tag Teams", side: "front" },
-  "0201": { player: "Mina Shirakawa", ...UD26, set: "Dazzlers", number: "DZ-2", side: "back" },
-  "0202": { player: "Mina Shirakawa", ...UD26, set: "Dazzlers", side: "front" },
-  "0203": { player: "Anna Jay", ...UD26, set: "Dazzlers", number: "DZ-5", side: "back" },
-  "0204": { player: "Anna Jay", ...UD26, set: "Dazzlers", side: "front" },
-  "0205": { player: "Mina Shirakawa", ...UD26, parallel: "Gold", set: "First UD", side: "back" },
-  "0206": { player: "Mina Shirakawa", ...UD26, set: "First UD", side: "front" },
-  "0207": { player: "Megan Bayne & Penelope Ford", ...UD26, set: "Tag Teams", parallel: "Gold", side: "back" },
-  "0208": { player: "Megan Bayne & Penelope Ford", ...UD26, set: "Tag Teams", parallel: "Gold", side: "front" },
-  "0209": { player: "Megan Bayne", ...UD26, set: "First UD", side: "back" },
-  "0210": { player: "Megan Bayne", ...UD26, set: "First UD", side: "front" },
-  "0211": { player: "Liv Morgan", ...TP25, side: "back" },
-  "0212": { player: "Liv Morgan", ...TP25, side: "front" },
-  "0213": { player: "Chelsea Green", ...TP25, set: "Festival Fury", number: "FVF-8", side: "back" },
-  "0214": { player: "Chelsea Green", ...TP25, side: "front" },
-  "0215": { player: "Kairi Sane", ...TP25, side: "back" },
-  "0216": { player: "Kairi Sane", ...TP25, side: "front" },
-  "0217": { player: "Xavier Woods", ...TP25, side: "back" },
-  "0218": { player: "Xavier Woods", ...TP25, parallel: "15/50", side: "front" },
-  "0219": { player: "Bret Hart", ...TP25, parallel: "Refractor", side: "back" },
-  "0220": { player: "Bret Hart", ...TP25, side: "front" },
-  "0221": { player: "Bret Hart", ...TP25, side: "back" },
-  "0222": { player: "Bret Hart", ...TP25, parallel: "81/99", side: "front" },
-  "0223": { player: "Bret Hart", ...TP25, side: "back" },
-  "0224": { player: "Bret Hart", ...TP25, side: "front" },
-  "0225": { player: "Alexa Bliss", ...TP25, side: "back" },
-  "0226": { player: "Alexa Bliss", ...TP25, side: "front" },
-  "0227": { player: "Kairi Sane", ...TP25, set: "Famed Phantoms", number: "FMP-35", side: "back" },
-  "0228": { player: "Kairi Sane", ...TP25, set: "Famed Phantoms", side: "front" },
-  "0229": { player: "Bret Hart", ...TP25, set: "Famed Phantoms", number: "FMP-4", side: "back" },
-  "0230": { player: "Bret Hart", ...TP25, set: "Famed Phantoms", side: "front" },
-  "0231": { player: "Jamie Hayter", ...UD26, set: "Mighty Ones", number: "MO-19", parallel: "Red", side: "back" },
-  "0232": { player: "Jamie Hayter", ...UD26, set: "Mighty Ones", parallel: "242/299", side: "front" },
-  "0233": { player: "Cope", ...UD26, set: "Deluxe", side: "back" },
-  "0234": { player: "Cope", ...UD26, set: "Deluxe", parallel: "147/250", side: "front" },
-  "0235": { player: "Athena", ...UD26, set: "Pyro", parallel: "Pyro", side: "back" },
-  "0236": { player: "Athena", ...UD26, set: "Pyro", side: "front" },
-  "0237": { player: "Chelsea Green", ...TP25, set: "Astro Knights", number: "AOK-1", side: "back" },
-  "0238": { player: "Chelsea Green", ...TP25, set: "Astro Knights", side: "front" },
-  "0239": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", number: "TT-3", side: "back" },
-  "0240": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", side: "front" },
-  "0241": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", number: "TT-13", side: "back" },
-  "0242": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", side: "front" },
-  "0243": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", number: "TT-7", side: "back" },
-  "0244": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", side: "front" },
-  "0245": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", number: "TT-15", side: "back" },
-  "0246": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", side: "front" },
-  "0247": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", number: "TT-8", side: "back" },
-  "0248": { player: "Toni Storm", ...UD26, set: "Toni's Timeline", side: "front" },
-  "0249": { player: "Willow Nightingale & Harley Cameron", ...UD26, set: "Tag Teams", parallel: "Dynamite", side: "back" },
-  "0250": { player: "Willow Nightingale & Harley Cameron", ...UD26, set: "Tag Teams", parallel: "104/199", side: "front" },
-  "0251": { player: "Lola Vice", ...TP25, side: "back" },
-  "0252": { player: "Lola Vice", ...TP25, side: "front" },
-  "0253": { player: "Lola Vice", ...TP25, side: "back" },
-  "0254": { player: "Lola Vice", ...TP25, side: "front" },
-  "0255": { player: "Lola Vice", ...TP25, side: "back" },
-  "0256": { player: "Lola Vice", ...TP25, side: "front" },
-  "0257": { player: "Lola Vice", ...TP25, side: "back" },
-  "0258": { player: "Lola Vice", ...TP25, parallel: "72/93", side: "front" },
-  "0259": { player: "Lola Vice", ...TP25, side: "back" },
-  "0260": { player: "Lola Vice", ...TP25, parallel: "067/125", side: "front" },
-  "0261": { player: "Michin", ...TP26, side: "back" },
-  "0262": { player: "Michin", ...TP26, parallel: "138/150", side: "front" },
-  "0263": { player: "Travis Scott", ...TP25, side: "back" },
-  "0264": { player: "Travis Scott", ...TP25, side: "front" },
-  "0265": { player: "Kofi Kingston", ...PN22, parallel: "Gold 05/10", number: "12", side: "back" },
-  "0266": { player: "Kofi Kingston", ...PN22, parallel: "Gold", side: "front" },
-  "0267": { player: "Shawn Michaels", ...PN22, parallel: "055/299", number: "199", side: "back" },
-};
-
-const DUMP_FLIP = new Set(["0233"]);
-
 let tessReady: Promise<TessWorker> | null = null;
 let tessDisabled = false;
 let ocrLock: Promise<void> = Promise.resolve();
@@ -598,31 +485,6 @@ function inferSide(text: string): CardSide {
   return "unknown";
 }
 
-function identityFromFilename(name: string): Partial<CardIdentity> {
-  const stem = name.replace(/\.[^.]+$/, "").toLowerCase();
-  const out: Partial<CardIdentity> = {};
-  if (/-back$|_back$/.test(stem)) out.side = "back";
-  if (/-front$|_front$/.test(stem)) out.side = "front";
-  const serial = stem.match(/year-manfu?cturer-card-(\d{4})/);
-  if (serial && DUMP[serial[1]]) {
-    Object.assign(out, DUMP[serial[1]]);
-  }
-  for (const hint of FILE_HINTS) {
-    if (!hint.test.test(stem)) continue;
-    for (const [key, value] of Object.entries(hint.patch)) {
-      if (out[key as keyof CardIdentity] == null && value != null) {
-        (out as Record<string, unknown>)[key] = value;
-      }
-    }
-  }
-  return out;
-}
-
-function dumpNeedsFlip(name: string) {
-  const serial = name.toLowerCase().match(/year-manfu?cturer-card-(\d{4})/);
-  return Boolean(serial && DUMP_FLIP.has(serial[1]));
-}
-
 function mergeIdentity(primary: Partial<CardIdentity>, fallback: Partial<CardIdentity>): Partial<CardIdentity> {
   return {
     player: primary.player ?? fallback.player ?? null,
@@ -667,16 +529,13 @@ function finalize(partial: Partial<CardIdentity>, rawText: string, ocrConf: numb
 
 export async function identifyCard(
   image: ImageData,
-  filename: string,
+  _filename?: string,
   opts: { vision?: boolean } = {},
 ): Promise<IdentifyResult> {
-  const fromName = identityFromFilename(filename);
-  const flipped = dumpNeedsFlip(filename);
+  // Filename is ignored — orientation and identity come from pixels only.
+  const fromName: Partial<CardIdentity> = {};
   if (typeof window === "undefined") {
-    return { identity: finalize(fromName, "", 0, "filename"), rotated: flipped };
-  }
-  if (fromName.player && fromName.year && fieldScore(fromName) >= 7) {
-    return { identity: finalize(fromName, "", 90, "filename"), rotated: flipped };
+    return { identity: finalize(fromName, "", 0, "ocr"), rotated: false };
   }
 
   return withOcrLock(async () => {

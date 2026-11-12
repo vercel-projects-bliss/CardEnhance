@@ -1,4 +1,4 @@
-import type { StudioSettings } from "./types";
+import type { AdaptiveStats, CardClass, StudioSettings } from "./types";
 import type { EnhanceResult } from "./enhance-math";
 
 export type EnhanceOk = EnhanceResult;
@@ -44,6 +44,9 @@ function runOnWorker(
         sharpnessBefore: event.data.sharpnessBefore,
         sharpnessAfter: event.data.sharpnessAfter,
         sharpnessDelta: event.data.sharpnessDelta,
+        cardClass: event.data.cardClass as CardClass | undefined,
+        adaptiveStats: event.data.adaptiveStats as AdaptiveStats | undefined,
+        chosenParams: event.data.chosenParams as StudioSettings | undefined,
       });
     };
     const onError = (err: ErrorEvent) => {
@@ -68,7 +71,12 @@ function runOnWorker(
   });
 }
 
-export function createEnhancePool(size = 2) {
+export function defaultPoolSize() {
+  const hw = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 2;
+  return Math.max(1, Math.min(4, hw - 1));
+}
+
+export function createEnhancePool(size = defaultPoolSize()) {
   const n = Math.max(1, Math.min(4, Math.round(size) || 1));
   const idle: Worker[] = Array.from({ length: n }, spawnEnhanceWorker);
   const waiters: Array<(worker: Worker) => void> = [];

@@ -1,3 +1,4 @@
+import { classifyCard, mapAdaptiveParams, measureAdaptiveStats } from "../lib/classify";
 import { processEnhance, type ScaleFn } from "../lib/enhance-math";
 import type { StudioSettings } from "../lib/types";
 
@@ -71,7 +72,13 @@ const scaleFn: ScaleFn = highQualityScale;
 ctx.onmessage = (event: MessageEvent<InMsg>) => {
   const { id, width, height, buffer, settings } = event.data;
   const src = new Uint8ClampedArray(buffer);
-  processEnhance(src, width, height, settings, scaleFn)
+  const classified = classifyCard(src, width, height);
+  const adaptiveStats = measureAdaptiveStats(src, width, height);
+  const chosen = mapAdaptiveParams(adaptiveStats, classified.cardClass, settings);
+  processEnhance(src, width, height, chosen, scaleFn, {
+    cardClass: classified.cardClass,
+    edgeProtect: 0.05,
+  })
     .then((result) => {
       ctx.postMessage(
         {
@@ -79,13 +86,16 @@ ctx.onmessage = (event: MessageEvent<InMsg>) => {
           width: result.width,
           height: result.height,
           buffer: result.data.buffer,
-          isChromeFoil: result.chromeFoil.isChromeFoil,
+          isChromeFoil: classified.cardClass === "chrome_foil_front",
           specularRatio: result.chromeFoil.specularRatio,
           specularPeakRatio: result.chromeFoil.specularPeakRatio,
           metallicContrast: result.chromeFoil.metallicContrast,
           sharpnessBefore: result.sharpnessBefore,
           sharpnessAfter: result.sharpnessAfter,
           sharpnessDelta: result.sharpnessDelta,
+          cardClass: classified.cardClass,
+          adaptiveStats,
+          chosenParams: chosen,
         },
         [result.data.buffer],
       );
