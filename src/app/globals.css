@@ -4,15 +4,15 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
 
-  --color-background: #070b14;
-  --color-surface: #0d1424;
-  --color-surface-raised: #121a2e;
-  --color-border: #1c2740;
-  --color-accent: #22d3ee;
-  --color-accent-dim: #155e75;
-  --color-ink: #e2e8f0;
-  --color-ink-muted: #94a3b8;
-  --color-ink-subtle: #64748b;
+  --color-background: #080808;
+  --color-surface: #0c1210;
+  --color-surface-raised: #101816;
+  --color-border: #0a3d3d;
+  --color-accent: #00ffff;
+  --color-laser: #00ff66;
+  --color-ink: #eafffb;
+  --color-ink-muted: #8fb8b2;
+  --color-ink-subtle: #4e7a74;
 }
 
 html {
@@ -21,16 +21,57 @@ html {
 
 html,
 body {
-  background: var(--color-background);
-  color: var(--color-ink);
+  background-color: #080808;
+  color: #eafffb;
 }
 
 body {
   min-height: 100dvh;
   overflow-x: hidden;
+  background-image:
+    linear-gradient(rgba(0, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(0, 0, 0, 0.18) 4px
+  );
+  opacity: 0.28;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  color: #f8fafc;
+  background: color-mix(in srgb, #00ffff 32%, transparent);
+  color: #080808;
+}
+
+.glow-text {
+  color: #00ffff;
+  text-shadow:
+    0 0 8px rgba(0, 255, 255, 0.55),
+    0 0 22px rgba(0, 255, 255, 0.28);
+}
+
+.glow-box {
+  box-shadow:
+    0 0 0 1px #00ffff,
+    0 0 16px rgba(0, 255, 255, 0.4);
+}
+
+.panel {
+  border: 1px solid #0a3d3d;
+  background: #0c1210;
+}
+
+input[type="range"] {
+  accent-color: #00ffff;
 }

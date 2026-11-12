@@ -72,6 +72,12 @@ function mapAudit(row: AuditDbRow): AuditRow {
     filename: meta.filename ?? null,
     player: meta.player ?? null,
     createdAt: asStamp(row.created_at),
+    chromeFoil: null,
+    scratchRemoval: null,
+    denoise: null,
+    sharpnessDelta: null,
+    resIn: null,
+    resOut: null,
   };
 }
 

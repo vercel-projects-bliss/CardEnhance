@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { StoredCard } from "@/lib/types";
 
 const controlClass =
-  "h-11 w-full rounded-xl border border-border bg-surface-raised px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  "h-11 w-full border border-border bg-surface-raised px-3 font-mono text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 export function IdentityForm({ card }: { card: StoredCard }) {
   const [player, setPlayer] = useState(card.player ?? "");
@@ -17,7 +17,7 @@ export function IdentityForm({ card }: { card: StoredCard }) {
 
   return (
     <form
-      className="grid gap-4 rounded-2xl border border-border bg-surface p-4 sm:p-6"
+      className="panel grid gap-4 p-4 sm:p-6"
       onSubmit={(event) => event.preventDefault()}
     >
       <p className="text-sm text-ink-muted">
@@ -67,7 +67,7 @@ export function IdentityForm({ card }: { card: StoredCard }) {
         <button
           type="submit"
           disabled
-          className="inline-flex h-10 items-center justify-center rounded-lg bg-accent/10 px-4 text-sm font-medium text-accent ring-1 ring-inset ring-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-10 items-center justify-center bg-accent px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
         >
           Save identity
         </button>

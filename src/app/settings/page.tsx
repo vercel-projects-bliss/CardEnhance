@@ -10,8 +10,9 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader
+        index="01"
         title="Settings"
-        description="Session options for restore, batch size, and export."
+        description="Session defaults for the batch editor inspector. Nothing here is written to the database."
       />
       <SettingsForm />
     </>

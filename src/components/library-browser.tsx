@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import type { StoredCard } from "@/lib/types";
 
 const controlClass =
-  "h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent sm:max-w-sm";
+  "h-11 w-full border border-border bg-surface px-3 font-mono text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent sm:max-w-sm";
 
 export function LibraryBrowser({ cards }: { cards: StoredCard[] }) {
   const [query, setQuery] = useState("");

@@ -12,8 +12,9 @@ export default function AuditPage() {
   return (
     <>
       <PageHeader
+        index="01"
         title="Audit"
-        description="A record of changes will appear here."
+        description="Restoration records for chrome/foil detection, scratch removal, denoise, sharpness delta, and in→out resolution."
       />
       <Suspense fallback={<p className="text-sm text-ink-muted">Loading audit log…</p>}>
         <AuditBody />

@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-dvh bg-background">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-sm focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-ink focus:outline-none focus:ring-2 focus:ring-accent"
       >
         Skip to content
       </a>
@@ -88,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur-md lg:hidden">
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}
             aria-controls={drawerId}
@@ -126,7 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <BrandMark compact />
               <button
                 type="button"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 aria-label="Close menu"
                 onClick={close}
               >
@@ -160,7 +160,7 @@ function SidebarContent({
       <div className="hidden px-5 pb-2 pt-6 lg:block">
         <Link
           href="/"
-          className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           onClick={onNavigate}
         >
           <BrandMark />
@@ -203,8 +203,8 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       className={
         active
-          ? "flex items-center gap-3 rounded-lg bg-accent/10 px-3 py-2 text-sm font-medium text-accent ring-1 ring-inset ring-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          : "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          ? "glow-box flex items-center gap-3 px-3 py-2 text-sm font-medium text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          : "flex items-center gap-3 border border-transparent px-3 py-2 text-sm font-medium text-ink-muted transition-colors hover:border-border hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       }
     >
       <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />

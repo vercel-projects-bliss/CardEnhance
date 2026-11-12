@@ -17,8 +17,8 @@ export function EmptyState({
     <section
       className={
         compact
-          ? "flex flex-col items-center justify-center rounded-2xl border border-border bg-surface px-6 py-8 text-center sm:px-8"
-          : "flex min-h-64 flex-col items-center justify-center rounded-2xl border border-border bg-surface px-6 py-16 text-center sm:min-h-72 sm:px-8"
+          ? "panel flex flex-col items-center justify-center px-6 py-7 text-center"
+          : "panel flex flex-col items-center justify-center px-6 py-12 text-center"
       }
     >
       <h2 className="text-base font-medium text-ink">{title}</h2>

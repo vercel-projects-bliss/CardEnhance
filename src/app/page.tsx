@@ -11,6 +11,7 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader
+        index="01"
         title="Dashboard"
         description="A quiet overview of your library and recent work."
       />
@@ -54,7 +55,7 @@ async function DashboardBody() {
         {stats.map((stat) => (
           <article
             key={stat.label}
-            className="rounded-2xl border border-border bg-surface px-5 py-5"
+            className="panel px-5 py-5"
           >
             <p className="font-mono text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
               {stat.label}
@@ -78,9 +79,9 @@ async function DashboardBody() {
 
 function PipelineStrip() {
   return (
-    <section className="rounded-2xl border border-border bg-surface px-5 py-4">
-      <h2 className="text-sm font-medium text-ink">Pipeline</h2>
-      <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+    <section className="panel px-5 py-4">
+      <h2 className="font-mono text-[11px] tracking-wide text-laser">// 02 PIPELINE</h2>
+      <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-ink-muted">
         {pipeline.map((stage, index) => (
           <li key={stage} className="flex items-center gap-2 whitespace-nowrap">
             <span>{stage}</span>
@@ -98,7 +99,7 @@ function PipelineStrip() {
 
 function DashboardFallback() {
   return (
-    <div className="rounded-2xl border border-border bg-surface px-5 py-8 text-sm text-ink-muted">
+    <div className="panel px-5 py-8 text-sm text-ink-muted">
       Loading library…
     </div>
   );

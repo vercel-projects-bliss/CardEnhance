@@ -37,6 +37,7 @@ async function CardDetail({ params }: CardDetailPageProps) {
     return (
       <>
         <PageHeader
+          index="01"
           title="Card"
           description="That card is not in the library."
         />

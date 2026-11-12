@@ -13,7 +13,7 @@ export function CardThumbnail({ card, href, imageUrl }: CardThumbnailProps) {
   const subtitle = cardSubtitle(card);
 
   const body = (
-    <div className="relative aspect-[2.5/3.5] overflow-hidden rounded-xl border border-border bg-surface-raised">
+    <div className="relative aspect-[2.5/3.5] overflow-hidden border border-border bg-surface-raised">
       <span className="pointer-events-none absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/[0.04] to-transparent" />
       {imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -35,7 +35,7 @@ export function CardThumbnail({ card, href, imageUrl }: CardThumbnailProps) {
   return (
     <Link
       href={href}
-      className="block rounded-xl outline-none ring-offset-2 ring-offset-background transition-opacity hover:opacity-95 focus-visible:ring-2 focus-visible:ring-accent"
+      className="block outline-none transition-opacity hover:opacity-95 focus-visible:ring-2 focus-visible:ring-accent"
     >
       {body}
     </Link>

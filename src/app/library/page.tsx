@@ -12,6 +12,7 @@ export default function LibraryPage() {
   return (
     <>
       <PageHeader
+        index="01"
         title="Library"
         description="Browse the cards in your library."
       />

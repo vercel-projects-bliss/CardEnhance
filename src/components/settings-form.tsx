@@ -1,133 +1,143 @@
 "use client";
 
+import { SectionLabel } from "@/components/section-label";
 import { useStudioSettings } from "@/components/studio-settings";
-import type { DescratchLevel, OutputFormat } from "@/lib/types";
-
-const controlClass =
-  "h-10 w-full rounded-lg border border-border bg-surface-raised px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 export function SettingsForm() {
   const { settings, setSettings } = useStudioSettings();
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <p className="text-sm leading-relaxed text-ink-muted">
-        These are the same session options used in Studio. In the working app
-        they stay in memory for the session and are not saved to the database.
+      <p className="font-mono text-xs leading-relaxed text-ink-muted">
+        These are the same session defaults as the Studio inspector. They stay
+        in memory for this session and are not saved to the database.
       </p>
 
-      <section className="rounded-2xl border border-border bg-surface px-5 py-5">
-        <h2 className="text-base font-medium text-ink">Restore</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Applied when you descratch or upscale a selected card.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-2 text-sm text-ink-muted">
-            Upscale scale
-            <select
-              className={controlClass}
-              value={settings.upscaleScale}
+      <section className="panel p-4">
+        <SectionLabel index="01">ENHANCEMENT</SectionLabel>
+        <div className="mt-4 flex flex-col gap-4">
+          <SliderRow
+            label="Scale"
+            value={settings.scale}
+            min={1}
+            max={4}
+            step={0.25}
+            format={(value) => `${value.toFixed(2)}×`}
+            help="Resamples with high-quality smoothing. Long edge is capped at 2200px."
+            onChange={(value) => setSettings({ scale: value })}
+          />
+          <SliderRow
+            label="Descratch"
+            value={settings.descratch}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(value) => value.toFixed(2)}
+            help="Median-filters thin bright/dark scanner scratches before denoise."
+            onChange={(value) => setSettings({ descratch: value })}
+          />
+          <label className="flex items-start gap-2 font-mono text-[11px] leading-snug text-ink-muted">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-accent"
+              checked={settings.descratchFoilOnly}
               onChange={(event) =>
-                setSettings({
-                  upscaleScale: Number(event.target.value) as 2 | 4,
-                })
+                setSettings({ descratchFoilOnly: event.target.checked })
               }
-            >
-              <option value={2}>2×</option>
-              <option value={4}>4×</option>
-            </select>
+            />
+            <span>
+              Only on scans detected as chrome/foil (specular-highlight heuristic)
+            </span>
           </label>
-          <label className="flex flex-col gap-2 text-sm text-ink-muted">
-            Descratch level
-            <select
-              className={controlClass}
-              value={settings.descratchLevel}
-              onChange={(event) =>
-                setSettings({
-                  descratchLevel: event.target.value as DescratchLevel,
-                })
-              }
-            >
-              <option value="off">Off</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
+          <SliderRow
+            label="Denoise"
+            value={settings.denoise}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(value) => value.toFixed(2)}
+            help="Blends a 3×3 box average back over the original."
+            onChange={(value) => setSettings({ denoise: value })}
+          />
+          <SliderRow
+            label="Sharpen"
+            value={settings.sharpen}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(value) => value.toFixed(2)}
+            help="Unsharp mask. Updates the measured sharpness delta after processing."
+            onChange={(value) => setSettings({ sharpen: value })}
+          />
+          <SliderRow
+            label="Contrast"
+            value={settings.contrast}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(value) => value.toFixed(2)}
+            help="Mid-grey S-curve, kept low so foil/chrome does not clip."
+            onChange={(value) => setSettings({ contrast: value })}
+          />
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border bg-surface px-5 py-5">
-        <h2 className="text-base font-medium text-ink">Batch</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          How many cards the enhance pool works on at once (1–4).
+      <section className="panel p-4">
+        <SectionLabel index="02">EXPORT</SectionLabel>
+        <p className="mt-3 font-mono text-[11px] leading-relaxed text-ink-subtle">
+          Download enhanced PNGs and export audit JSON once real processed
+          pixels and a measured sharpness delta exist. Those actions stay
+          disabled until processing is connected.
         </p>
-        <div className="mt-4 flex gap-2">
-          {([1, 2, 3, 4] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSettings({ concurrency: value })}
-              className={
-                settings.concurrency === value
-                  ? "h-11 flex-1 rounded-xl border border-accent/40 bg-accent/10 text-sm font-medium text-accent"
-                  : "h-11 flex-1 rounded-xl border border-border bg-surface-raised text-sm font-medium text-ink-muted hover:text-ink"
-              }
-            >
-              {value}
-            </button>
-          ))}
-        </div>
       </section>
+    </div>
+  );
+}
 
-      <section className="rounded-2xl border border-border bg-surface px-5 py-5">
-        <h2 className="text-base font-medium text-ink">Output</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Format and quality used when exporting a ZIP.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-2 text-sm text-ink-muted">
-            Format
-            <select
-              className={controlClass}
-              value={settings.exportFormat}
-              onChange={(event) =>
-                setSettings({
-                  exportFormat: event.target.value as OutputFormat,
-                })
-              }
-            >
-              <option value="png">PNG</option>
-              <option value="jpg">JPEG</option>
-              <option value="webp">WebP</option>
-            </select>
-          </label>
-          {settings.exportFormat !== "png" ? (
-            <label className="flex flex-col gap-2 text-sm text-ink-muted">
-              Quality
-              <div className="flex h-10 items-center gap-3">
-                <input
-                  type="range"
-                  min={60}
-                  max={100}
-                  value={settings.exportQuality}
-                  onChange={(event) =>
-                    setSettings({ exportQuality: Number(event.target.value) })
-                  }
-                  className="flex-1 accent-accent"
-                />
-                <span className="font-mono text-xs tabular-nums text-ink">
-                  {settings.exportQuality}
-                </span>
-              </div>
-            </label>
-          ) : (
-            <p className="self-end text-sm text-ink-subtle">
-              PNG is lossless, so quality does not apply.
-            </p>
-          )}
-        </div>
-      </section>
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  format,
+  help,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (value: number) => string;
+  help: string;
+  onChange: (value: number) => void;
+}) {
+  const id = `settings-${label.toLowerCase()}`;
+
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <label htmlFor={id} className="font-mono text-[11px] text-ink">
+          {label}
+        </label>
+        <span className="font-mono text-[11px] tabular-nums text-accent">
+          {format(value)}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full"
+      />
+      <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-subtle">
+        {help}
+      </p>
     </div>
   );
 }

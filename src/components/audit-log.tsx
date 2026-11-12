@@ -7,18 +7,27 @@ import { formatWhen } from "@/lib/card-label";
 import type { AuditRow } from "@/lib/types";
 
 const controlClass =
-  "h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent sm:max-w-sm";
+  "h-10 w-full border border-border bg-background px-3 font-mono text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent sm:max-w-sm";
+
+const columns = [
+  "When",
+  "File",
+  "Chrome / foil",
+  "Scratch removal",
+  "Denoise",
+  "Sharpness Δ",
+  "Upscale (in → out)",
+] as const;
 
 export function AuditLog({ rows }: { rows: AuditRow[] }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <p className="shrink-0 text-sm text-ink-muted">
-          <span className="font-mono tabular-nums text-ink">{rows.length}</span>
-          {" "}recorded actions
+        <p className="shrink-0 font-mono text-xs text-ink-muted">
+          <span className="tabular-nums text-ink">{rows.length}</span> recorded actions
         </p>
         <form
           className="flex w-full sm:justify-end"
@@ -38,52 +47,66 @@ export function AuditLog({ rows }: { rows: AuditRow[] }) {
         </form>
       </div>
 
-      {rows.length === 0 ? (
-        <EmptyState
-          compact
-          title="No audit entries"
-          description="Processing a card in Studio writes a card.processed entry here."
-        />
-      ) : filtered.length === 0 ? (
+      {rows.length > 0 && filtered.length === 0 ? (
         <EmptyState
           compact
           title="No matches"
           description={`No audit rows match “${query}”.`}
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[36rem] text-left text-sm">
-            <thead className="bg-surface-raised text-ink-subtle">
+        <div className="panel overflow-x-auto">
+          <table className="w-full min-w-[52rem] text-left font-mono text-xs">
+            <thead className="bg-surface-raised text-laser">
               <tr>
-                <th className="px-4 py-3 font-medium">When</th>
-                <th className="px-4 py-3 font-medium">Action</th>
-                <th className="px-4 py-3 font-medium">Subject</th>
-                <th className="px-4 py-3 font-medium">File</th>
+                {columns.map((column) => (
+                  <th key={column} className="border-b border-border px-3 py-2 font-medium">
+                    {column}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row) => (
-                <tr key={row.id} className="border-t border-border">
-                  <td className="px-4 py-3 font-mono text-xs text-ink-muted">
-                    {formatWhen(row.createdAt)}
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-3 py-6 text-ink-muted">
+                    <p className="max-w-xl">
+                      No restoration records yet. Chrome/foil detection, scratch removal, denoise, sharpness Δ, and in→out resolution will appear here after a batch runs.
+                    </p>
                   </td>
-                  <td className="px-4 py-3 text-ink">{row.action}</td>
-                  <td className="px-4 py-3">
+                </tr>
+              ) : filtered.map((row) => (
+                <tr key={row.id} className="border-t border-border">
+                  <td className="px-3 py-2 text-ink-muted">{formatWhen(row.createdAt)}</td>
+                  <td className="px-3 py-2 text-ink">
                     {row.entityType === "card" && row.entityId ? (
                       <Link
                         href={`/library/${row.entityId}`}
                         className="text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                       >
-                        {row.player || row.entityId.slice(0, 8)}
+                        {row.filename || row.player || row.entityId.slice(0, 8)}
                       </Link>
                     ) : (
-                      <span className="text-ink">
-                        {row.player || row.entityId || "—"}
-                      </span>
+                      row.filename || row.player || "—"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-ink-muted">
-                    {row.filename || "—"}
+                  <td className="px-3 py-2 text-ink-muted">
+                    {row.chromeFoil === null ? "—" : row.chromeFoil ? "detected" : "no"}
+                  </td>
+                  <td className="px-3 py-2 text-ink-muted">{row.scratchRemoval ?? "—"}</td>
+                  <td className="px-3 py-2 text-ink-muted">
+                    {row.denoise === null ? "—" : row.denoise.toFixed(2)}
+                  </td>
+                  <td
+                    className={
+                      (row.sharpnessDelta ?? 0) > 0 ? "px-3 py-2 text-laser" : "px-3 py-2 text-ink-muted"
+                    }
+                  >
+                    {row.sharpnessDelta === null
+                      ? "—"
+                      : `${row.sharpnessDelta > 0 ? "+" : ""}${row.sharpnessDelta.toFixed(2)}`}
+                  </td>
+                  <td className="px-3 py-2 text-ink-muted">
+                    {row.resIn || row.resOut ? `${row.resIn ?? "—"} → ${row.resOut ?? "—"}` : "—"}
                   </td>
                 </tr>
               ))}

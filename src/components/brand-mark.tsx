@@ -2,16 +2,16 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className="flex items-center gap-2.5">
       <span
-        className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 ring-1 ring-accent/25"
+        className="flex h-8 w-8 items-center justify-center border border-accent bg-background"
         aria-hidden="true"
       >
-        <span className="block h-[18px] w-[13px] rounded-[3px] border border-accent/80 bg-accent/15" />
+        <span className="block h-[18px] w-[13px] border border-accent/90" />
       </span>
       <span
         className={
           compact
-            ? "text-[15px] font-semibold tracking-tight text-ink"
-            : "text-sm font-semibold tracking-tight text-ink"
+            ? "glow-text text-[15px] font-semibold tracking-tight"
+            : "glow-text text-sm font-semibold tracking-tight"
         }
       >
         CardEnhance
