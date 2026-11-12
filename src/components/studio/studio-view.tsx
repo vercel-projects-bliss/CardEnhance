@@ -462,7 +462,8 @@ async function processOne(
     }
 
     const first = prepared[0];
-    await finishPrepared(target.id, target.name, first, settings, pool, ctx, source.width, source.height);
+    const firstName = prepared.length > 1 ? first.filename : target.name;
+    await finishPrepared(target.id, firstName, first, settings, pool, ctx, source.width, source.height);
 
     if (ctx.hasChildren(target.id)) return;
 

@@ -27,7 +27,7 @@ function tessPaths() {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return {
     workerPath: `${origin}/tess/worker.min.js`,
-    corePath: `${origin}/tess/tesseract-core-simd-lstm.wasm.js`,
+    corePath: `${origin}/tess/tesseract-core-simd.wasm.js`,
     langPath: `${origin}/tess`,
   };
 }
@@ -39,7 +39,7 @@ async function getWorker(): Promise<TessWorker> {
       const paths = tessPaths();
       let worker;
       try {
-        worker = await createWorker(["eng", "osd"], 1, {
+        worker = await createWorker("eng+osd", 3, {
           workerPath: paths.workerPath,
           corePath: paths.corePath,
           langPath: paths.langPath,
@@ -48,7 +48,7 @@ async function getWorker(): Promise<TessWorker> {
           logger: () => {},
         });
       } catch {
-        worker = await createWorker("eng", 1, {
+        worker = await createWorker("eng", 3, {
           workerPath: paths.workerPath,
           corePath: paths.corePath,
           langPath: paths.langPath,
@@ -60,8 +60,6 @@ async function getWorker(): Promise<TessWorker> {
       const tess = worker as unknown as TessWorker;
       await tess.setParameters?.({
         user_defined_dpi: "150",
-        tessedit_char_whitelist:
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-'./",
       });
       return tess;
     })();
