@@ -412,33 +412,48 @@ function softmax(logits: number[]): number[] {
   return exps.map((v) => v / sum);
 }
 
-function bindSharedOrtRuntime(): void {
-  configureOrtWasm();
-  // transformers.js uses this symbol if present, instead of initializing its
-  // nested onnxruntime-web@1.22-dev (which tries to import() a cross-origin
-  // jsep.mjs from the CDN and fails in the classic enhance worker).
-  const key = Symbol.for("onnxruntime");
-  Object.defineProperty(globalThis, key, { value: ort, configurable: true });
+async function cachedScriptBlobUrl(url: string): Promise<string> {
+  const bytes = await fetchCachedModelBytes(url);
+  // import() in the classic enhance worker cannot load cross-origin CDN .mjs files
+  // ("Failed to fetch dynamically imported module"). A same-origin blob: URL works.
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const blob = new Blob([copy], { type: "text/javascript;charset=utf-8" });
+  return URL.createObjectURL(blob);
 }
 
-function configureTransformersEnv(env: typeof import("@huggingface/transformers").env): void {
+let transformersWasmPaths: Record<string, string> | null = null;
+
+async function getTransformersWasmPaths(): Promise<Record<string, string>> {
+  if (transformersWasmPaths) return transformersWasmPaths;
+  const jsepMjs = await cachedScriptBlobUrl(`${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.jsep.mjs`);
+  const plainMjs = await cachedScriptBlobUrl(`${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.mjs`);
+  transformersWasmPaths = {
+    "ort-wasm-simd-threaded.jsep.mjs": jsepMjs,
+    "ort-wasm-simd-threaded.mjs": plainMjs,
+    // WASM itself is fetched(), not import(), so the CORS CDN URL is fine. Do not commit these blobs.
+    "ort-wasm-simd-threaded.jsep.wasm": `${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.jsep.wasm`,
+    "ort-wasm-simd-threaded.wasm": `${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.wasm`,
+  };
+  return transformersWasmPaths;
+}
+
+async function configureTransformersEnv(env: typeof import("@huggingface/transformers").env): Promise<void> {
   // Bundled workers can look like Node (stubbed fs/path) and then fail looking for local models.
   env.allowLocalModels = false;
   env.allowRemoteModels = true;
   env.useBrowserCache = true;
   env.useFS = false;
   env.useFSCache = false;
-  const onnx = env.backends.onnx as { wasm?: { wasmPaths?: string; numThreads?: number; proxy?: boolean; simd?: boolean } };
+  const onnx = env.backends.onnx as {
+    wasm?: { wasmPaths?: string | Record<string, string>; numThreads?: number; proxy?: boolean; simd?: boolean };
+  };
   onnx.wasm = onnx.wasm ?? {};
-  // If we successfully bound the app's 1.21 runtime, keep serving /ort/.
-  // Only fall back to the 1.22-dev CDN if transformers still has no paths.
-  if (!onnx.wasm.wasmPaths) {
-    const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-    onnx.wasm.wasmPaths = origin ? `${origin}/ort/` : TRANSFORMERS_ORT_WASM;
-  }
+  onnx.wasm.wasmPaths = await getTransformersWasmPaths();
   onnx.wasm.numThreads = 1;
   onnx.wasm.proxy = false;
   onnx.wasm.simd = true;
+  console.info("CLIP ORT wasmPaths ready", Object.keys(onnx.wasm.wasmPaths));
 }
 
 function toFloatEmbed(raw: unknown): Float32Array {
@@ -460,9 +475,8 @@ function toFloatEmbed(raw: unknown): Float32Array {
 
 async function loadClipEncoder(modelId: string): Promise<ClipHandle> {
   installWorkerWindowShim();
-  bindSharedOrtRuntime();
   const transformers = await import("@huggingface/transformers");
-  configureTransformersEnv(transformers.env);
+  await configureTransformersEnv(transformers.env);
 
   const tokenizer = await transformers.AutoTokenizer.from_pretrained(modelId);
   const processor = await transformers.AutoProcessor.from_pretrained(modelId);
