@@ -39,11 +39,6 @@ const YUNET_FALLBACK_URLS = [
 
 const MODEL_CACHE_NAME = "cardenhance-onnx-models-v1";
 
-// @huggingface/transformers@3.8.1 depends on onnxruntime-web@1.22.0-dev, not the
-// app's vendored 1.21.0 /ort files. Point its wasm loader at the matching CDN.
-const TRANSFORMERS_ORT_WASM =
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
-
 export type OnnxVisionStatus = {
   yunet: boolean;
   docOri: boolean;
@@ -412,30 +407,19 @@ function softmax(logits: number[]): number[] {
   return exps.map((v) => v / sum);
 }
 
-async function cachedScriptBlobUrl(url: string): Promise<string> {
-  const bytes = await fetchCachedModelBytes(url);
-  // import() in the classic enhance worker cannot load cross-origin CDN .mjs files
-  // ("Failed to fetch dynamically imported module"). A same-origin blob: URL works.
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const blob = new Blob([copy], { type: "text/javascript;charset=utf-8" });
-  return URL.createObjectURL(blob);
-}
-
-let transformersWasmPaths: Record<string, string> | null = null;
-
-async function getTransformersWasmPaths(): Promise<Record<string, string>> {
-  if (transformersWasmPaths) return transformersWasmPaths;
-  const jsepMjs = await cachedScriptBlobUrl(`${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.jsep.mjs`);
-  const plainMjs = await cachedScriptBlobUrl(`${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.mjs`);
-  transformersWasmPaths = {
-    "ort-wasm-simd-threaded.jsep.mjs": jsepMjs,
-    "ort-wasm-simd-threaded.mjs": plainMjs,
-    // WASM itself is fetched(), not import(), so the CORS CDN URL is fine. Do not commit these blobs.
-    "ort-wasm-simd-threaded.jsep.wasm": `${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.jsep.wasm`,
-    "ort-wasm-simd-threaded.wasm": `${TRANSFORMERS_ORT_WASM}ort-wasm-simd-threaded.wasm`,
+function transformersOrtWasmPaths(): Record<string, string> {
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";
+  const glue = origin ? `${origin}/ort122/` : "/ort122/";
+  // JS glue is same-origin so the classic worker can import() it. The large .wasm
+  // files stay on a CDN (not in Git). Playwright must not attach the Vercel bypass
+  // header to these third-party requests or CORS preflight fails.
+  const wasmCdn = "https://unpkg.com/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
+  return {
+    "ort-wasm-simd-threaded.jsep.mjs": `${glue}ort-wasm-simd-threaded.jsep.mjs`,
+    "ort-wasm-simd-threaded.mjs": `${glue}ort-wasm-simd-threaded.mjs`,
+    "ort-wasm-simd-threaded.jsep.wasm": `${wasmCdn}ort-wasm-simd-threaded.jsep.wasm`,
+    "ort-wasm-simd-threaded.wasm": `${wasmCdn}ort-wasm-simd-threaded.wasm`,
   };
-  return transformersWasmPaths;
 }
 
 async function configureTransformersEnv(env: typeof import("@huggingface/transformers").env): Promise<void> {
@@ -449,12 +433,13 @@ async function configureTransformersEnv(env: typeof import("@huggingface/transfo
     wasm?: { wasmPaths?: string | Record<string, string>; numThreads?: number; proxy?: boolean; simd?: boolean };
   };
   onnx.wasm = onnx.wasm ?? {};
-  onnx.wasm.wasmPaths = await getTransformersWasmPaths();
+  onnx.wasm.wasmPaths = transformersOrtWasmPaths();
   onnx.wasm.numThreads = 1;
   onnx.wasm.proxy = false;
   onnx.wasm.simd = true;
-  console.info("CLIP ORT wasmPaths ready", Object.keys(onnx.wasm.wasmPaths));
+  console.info("CLIP ORT wasmPaths ready", onnx.wasm.wasmPaths);
 }
+
 
 function toFloatEmbed(raw: unknown): Float32Array {
   if (raw instanceof Float32Array) return l2Normalize(raw);
