@@ -1179,35 +1179,43 @@ async function resolveUprightOrientation(
   const thumb640 = downsampleNearest(img, 640, 16);
   const thumb320 = downsampleNearest(img, 320, 16);
 
-  const evals = await Promise.all(
-    candidates.map(async (deg) => {
-      const rot640 = rotateQuadrant(thumb640, deg);
-      const rot320 = rotateQuadrant(thumb320, deg);
-      const heuristic = scoreUprightHeuristicNormalized(rot320);
+  // Evaluate quadrants sequentially. Concurrent InferenceSession.run() on the
+  // same YuNet / doc-ori session deadlocks onnxruntime-web's WASM backend.
+  const evals: Array<{
+    deg: RotationQuadrant;
+    face: number;
+    doc: number;
+    heuristic: number;
+    combined: number;
+    ocr: number;
+  }> = [];
+  for (const deg of candidates) {
+    const rot640 = rotateQuadrant(thumb640, deg);
+    const rot320 = rotateQuadrant(thumb320, deg);
+    const heuristic = scoreUprightHeuristicNormalized(rot320);
 
-      let face = 0;
-      if (opts.scoreUprightFace) {
-        try {
-          const s = await opts.scoreUprightFace(rot640.rgba, rot640.width, rot640.height, deg);
-          face = Number.isFinite(s) ? clamp(s, 0, 1) : 0;
-        } catch {
-          face = 0;
-        }
+    let face = 0;
+    if (opts.scoreUprightFace) {
+      try {
+        const s = await opts.scoreUprightFace(rot640.rgba, rot640.width, rot640.height, deg);
+        face = Number.isFinite(s) ? clamp(s, 0, 1) : 0;
+      } catch {
+        face = 0;
       }
+    }
 
-      let doc = 0;
-      if (opts.scoreUprightDoc) {
-        try {
-          const s = await opts.scoreUprightDoc(rot320.rgba, rot320.width, rot320.height, deg);
-          doc = Number.isFinite(s) ? clamp(s, 0, 1) : 0;
-        } catch {
-          doc = 0;
-        }
+    let doc = 0;
+    if (opts.scoreUprightDoc) {
+      try {
+        const s = await opts.scoreUprightDoc(rot320.rgba, rot320.width, rot320.height, deg);
+        doc = Number.isFinite(s) ? clamp(s, 0, 1) : 0;
+      } catch {
+        doc = 0;
       }
+    }
 
-      return { deg, face, doc, heuristic, combined: 0, ocr: 0 };
-    }),
-  );
+    evals.push({ deg, face, doc, heuristic, combined: 0, ocr: 0 });
+  }
 
   const maxFace = Math.max(...evals.map((e) => e.face));
   const maxDoc = Math.max(...evals.map((e) => e.doc));
