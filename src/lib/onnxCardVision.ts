@@ -2,6 +2,7 @@
 // Browser/WebWorker ONNX Vision Ensemble with persistent Cache Storage.
 // Keeps Git/Vercel bundles tiny—models download once on client and cache locally.
 
+import { installWorkerWindowShim } from "./workerWindowShim";
 import * as ort from "onnxruntime-web";
 import type { CardSurfaceProfile, CardVisionAdapters } from "./adaptiveCardPipeline";
 
@@ -445,6 +446,7 @@ function toFloatEmbed(raw: unknown): Float32Array {
 }
 
 async function loadClipEncoder(modelId: string): Promise<ClipHandle> {
+  installWorkerWindowShim();
   const transformers = await import("@huggingface/transformers");
   configureTransformersEnv(transformers.env);
 
@@ -520,8 +522,10 @@ export async function createOnnxCardVisionAdapters(
   if (yunetBytes) yunetSession = await createBestSession(yunetBytes).catch(() => null);
   if (docBytes) docOriSession = await createBestSession(docBytes).catch(() => null);
 
+  let clipFailed = false;
   const ensureClip = async () => {
     if (clipHandle) return clipHandle;
+    if (clipFailed) return null;
     if (!cfg.clipModelId) {
       visionStatus.clipError = "No CLIP model id configured";
       return null;
@@ -532,6 +536,7 @@ export async function createOnnxCardVisionAdapters(
       visionStatus.clipError = null;
     } catch (err) {
       clipHandle = null;
+      clipFailed = true;
       visionStatus.clip = false;
       visionStatus.clipError = errorMessage(err);
       console.error("CLIP init failed", visionStatus.clipError);

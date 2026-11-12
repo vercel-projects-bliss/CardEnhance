@@ -1,6 +1,9 @@
 // src/workers/enhance.worker.ts
 /// <reference lib="webworker" />
 
+import { installWorkerWindowShim } from "../lib/workerWindowShim";
+installWorkerWindowShim();
+
 import {
   runAdaptiveCardPipeline,
   splitMultiCardSheet,
