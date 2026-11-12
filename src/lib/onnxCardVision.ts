@@ -103,42 +103,17 @@ function configureOrtWasm(): void {
   ort.env.wasm.proxy = false;
 }
 
-async function webGpuAdapterAvailable(): Promise<boolean> {
-  const gpu = (globalThis as unknown as { navigator?: { gpu?: { requestAdapter?: () => Promise<unknown> } } })
-    .navigator?.gpu;
-  if (!gpu?.requestAdapter) return false;
-  try {
-    const adapter = await withTimeout(gpu.requestAdapter(), 2000, "webgpu requestAdapter");
-    return Boolean(adapter);
-  } catch {
-    return false;
-  }
-}
-
 async function createBestSession(modelBytes: Uint8Array): Promise<OrtSession> {
   configureOrtWasm();
-  const wasmOptions = {
-    executionProviders: ["wasm"] as const,
-    graphOptimizationLevel: "all" as const,
-  };
-  // Only attempt WebGPU when an adapter actually appears. Passing "webgpu" (even
-  // with a WASM fallback in the same list) can hang indefinitely on SwiftShader /
-  // headless Vulkan instead of throwing.
-  if (await webGpuAdapterAvailable()) {
-    try {
-      return await withTimeout(
-        ort.InferenceSession.create(modelBytes, {
-          executionProviders: ["webgpu"],
-          graphOptimizationLevel: "all",
-        }),
-        8000,
-        "webgpu session",
-      );
-    } catch {
-      // Fall through to WASM
-    }
-  }
-  return ort.InferenceSession.create(modelBytes, wasmOptions);
+  // Product intent is WebGPU with WASM fallback, but onnxruntime-web's webgpu
+  // provider can block the worker thread indefinitely on software/SwiftShader
+  // adapters so Promise timeouts never fire. Always create the session with WASM
+  // (the official /ort WASM is already vendored). A later pass can opt into
+  // WebGPU on a discrete adapter from a dedicated watchdog worker.
+  return ort.InferenceSession.create(modelBytes, {
+    executionProviders: ["wasm"],
+    graphOptimizationLevel: "all",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +300,11 @@ export async function createOnnxCardVisionAdapters(
   const PROMPT_LABELS = Object.keys(CARD_PROMPTS);
 
   await ensureClip();
+  console.info("onnx card vision ready", {
+    yunet: Boolean(yunetSession),
+    docOri: Boolean(docOriSession),
+    clip: Boolean(clipClassifier),
+  });
 
   return {
     scoreUprightFace: yunetSession
