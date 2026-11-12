@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
+import { ActionLink } from "@/components/action-link";
+import { CardThumbnail } from "@/components/card-thumbnail";
+import { EmptyState } from "@/components/empty-state";
+import { IdentityForm } from "@/components/identity-form";
 import { PageHeader } from "@/components/page-header";
+import { cardSubtitle, cardTitle } from "@/lib/card-label";
+import { getStoredCard } from "@/lib/data";
 
 type CardDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -10,12 +17,13 @@ export async function generateMetadata({
   params,
 }: CardDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  return { title: `Card ${id}` };
+  const card = await getStoredCard(id);
+  return { title: card ? cardTitle(card) : "Card" };
 }
 
 export default function CardDetailPage({ params }: CardDetailPageProps) {
   return (
-    <Suspense fallback={<CardDetailBody id="…" />}>
+    <Suspense fallback={<p className="text-sm text-ink-muted">Loading card…</p>}>
       <CardDetail params={params} />
     </Suspense>
   );
@@ -23,37 +31,43 @@ export default function CardDetailPage({ params }: CardDetailPageProps) {
 
 async function CardDetail({ params }: CardDetailPageProps) {
   const { id } = await params;
-  return <CardDetailBody id={id} />;
-}
+  const card = await getStoredCard(id);
 
-function CardDetailBody({ id }: { id: string }) {
+  if (!card) {
+    return (
+      <>
+        <PageHeader
+          title="Card"
+          description="That card is not in the library."
+        />
+        <EmptyState
+          compact
+          title="Nothing here"
+          description="The library has no card with this id yet."
+          action={<ActionLink href="/library">Back to Library</ActionLink>}
+        />
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHeader
-        title="Card"
-        description="Details for this card will appear here."
-      />
+      <p className="mb-3 text-xs text-ink-subtle">
+        <Link
+          href="/library"
+          className="hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Library
+        </Link>
+        <span aria-hidden> / </span>
+        <span>{cardTitle(card)}</span>
+      </p>
+      <PageHeader title={cardTitle(card)} description={cardSubtitle(card)} />
 
-      <section className="flex flex-col items-center rounded-2xl border border-border bg-surface px-5 py-10 sm:px-6">
-        <p className="font-mono text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
-          Card id
-        </p>
-        <p className="mt-2 max-w-full break-all text-center font-mono text-sm text-ink">
-          {id}
-        </p>
-
-        <div className="mt-8 w-full max-w-[220px]">
-          <div
-            className="relative aspect-[2.5/3.5] overflow-hidden rounded-xl border border-border bg-surface-raised"
-            aria-hidden="true"
-          >
-            <span className="pointer-events-none absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/[0.04] to-transparent" />
-          </div>
-        </div>
-        <p className="mt-4 text-center text-sm leading-relaxed text-ink-muted">
-          No thumbnail yet.
-        </p>
-      </section>
+      <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+        <CardThumbnail card={card} />
+        <IdentityForm card={card} />
+      </div>
     </>
   );
 }

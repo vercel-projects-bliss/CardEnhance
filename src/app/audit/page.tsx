@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { EmptyState } from "@/components/empty-state";
+import { Suspense } from "react";
+import { AuditLog } from "@/components/audit-log";
 import { PageHeader } from "@/components/page-header";
+import { listAuditLogs } from "@/lib/data";
 
 export const metadata: Metadata = {
   title: "Audit",
@@ -13,10 +15,14 @@ export default function AuditPage() {
         title="Audit"
         description="A record of changes will appear here."
       />
-      <EmptyState
-        title="No activity yet"
-        description="When actions are recorded, they will be listed on this page."
-      />
+      <Suspense fallback={<p className="text-sm text-ink-muted">Loading audit log…</p>}>
+        <AuditBody />
+      </Suspense>
     </>
   );
+}
+
+async function AuditBody() {
+  const rows = await listAuditLogs();
+  return <AuditLog rows={rows} />;
 }

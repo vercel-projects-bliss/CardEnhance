@@ -11,11 +11,12 @@ export default function AssistantPage() {
     <>
       <PageHeader
         title="Assistant"
-        description="Ask for help with a card from this page."
+        description="This page is reserved for later. The working app does not include an assistant."
       />
       <EmptyState
-        title="Assistant is not connected"
-        description="A conversation will appear here once this page is wired up."
+        compact
+        title="No assistant in the working app"
+        description="There are no assistant controls to show yet, so this page stays empty rather than inventing a chat that would not work."
       />
     </>
   );

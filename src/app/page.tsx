@@ -1,11 +1,11 @@
-import { CardThumbnailGrid } from "@/components/card-thumbnail-grid";
+import { Suspense } from "react";
+import { ActionLink } from "@/components/action-link";
+import { CardGrid } from "@/components/card-thumbnail";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { getLibrarySummary } from "@/lib/data";
 
-const stats = [
-  { label: "Library", value: "—" },
-  { label: "Studio", value: "—" },
-  { label: "Audit", value: "—" },
-] as const;
+const pipeline = ["Detect", "Rectify", "OCR", "Enhance", "Export"] as const;
 
 export default function DashboardPage() {
   return (
@@ -14,15 +14,43 @@ export default function DashboardPage() {
         title="Dashboard"
         description="A quiet overview of your library and recent work."
       />
+      <Suspense fallback={<DashboardFallback />}>
+        <DashboardBody />
+      </Suspense>
+    </>
+  );
+}
 
-      <section className="rounded-2xl border border-border bg-surface px-5 py-5 sm:px-6">
-        <h2 className="text-base font-medium text-ink">At a glance</h2>
-        <p className="mt-1 max-w-xl text-sm leading-relaxed text-ink-muted">
-          Counts and recent cards will show up here as your library fills in.
-        </p>
-      </section>
+async function DashboardBody() {
+  const { cards, processed, auditCount } = await getLibrarySummary();
 
-      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Summary">
+  if (cards.length === 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <EmptyState
+          compact
+          title="No cards yet"
+          description="Open Studio to upload and process your first card scans."
+          action={<ActionLink href="/studio">Open Studio</ActionLink>}
+        />
+        <PipelineStrip />
+      </div>
+    );
+  }
+
+  const recent = cards.slice(0, 10);
+  const stats = [
+    { label: "Library", value: String(cards.length) },
+    { label: "Processed", value: String(processed) },
+    { label: "Audit", value: String(auditCount) },
+  ];
+
+  return (
+    <>
+      <section
+        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+        aria-label="Summary"
+      >
         {stats.map((stat) => (
           <article
             key={stat.label}
@@ -38,13 +66,40 @@ export default function DashboardPage() {
         ))}
       </section>
 
+      <PipelineStrip />
+
       <section className="mt-10">
         <h2 className="mb-4 text-base font-medium text-ink">Recent cards</h2>
-        <CardThumbnailGrid
-          label="Recent cards"
-          message="No cards yet. Thumbnails will appear in this grid when cards are added."
-        />
+        <CardGrid cards={recent} label="Recent cards" />
       </section>
     </>
+  );
+}
+
+function PipelineStrip() {
+  return (
+    <section className="rounded-2xl border border-border bg-surface px-5 py-4">
+      <h2 className="text-sm font-medium text-ink">Pipeline</h2>
+      <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+        {pipeline.map((stage, index) => (
+          <li key={stage} className="flex items-center gap-2 whitespace-nowrap">
+            <span>{stage}</span>
+            {index < pipeline.length - 1 ? (
+              <span aria-hidden className="text-ink-subtle">
+                →
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function DashboardFallback() {
+  return (
+    <div className="rounded-2xl border border-border bg-surface px-5 py-8 text-sm text-ink-muted">
+      Loading library…
+    </div>
   );
 }

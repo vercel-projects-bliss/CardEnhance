@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { StudioView } from "@/components/studio/studio-view";
 
 export const metadata: Metadata = {
   title: "Studio",
@@ -11,12 +11,9 @@ export default function StudioPage() {
     <>
       <PageHeader
         title="Studio"
-        description="Open a scan when you are ready to work on a card."
+        description="Upload scans, then crop, rectify, read, restore, and export a batch."
       />
-      <EmptyState
-        title="No scan open"
-        description="The workspace will appear here once a card is opened."
-      />
+      <StudioView />
     </>
   );
 }

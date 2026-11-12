@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { CardThumbnailGrid } from "@/components/card-thumbnail-grid";
+import { Suspense } from "react";
+import { LibraryBrowser } from "@/components/library-browser";
 import { PageHeader } from "@/components/page-header";
+import { listStoredCards } from "@/lib/data";
 
 export const metadata: Metadata = {
   title: "Library",
@@ -13,11 +15,14 @@ export default function LibraryPage() {
         title="Library"
         description="Browse the cards in your library."
       />
-      <CardThumbnailGrid
-        label="Library"
-        message="No cards in the library yet. Thumbnails will appear in this grid when cards are added."
-        count={10}
-      />
+      <Suspense fallback={<p className="text-sm text-ink-muted">Loading library…</p>}>
+        <LibraryBody />
+      </Suspense>
     </>
   );
+}
+
+async function LibraryBody() {
+  const cards = await listStoredCards();
+  return <LibraryBrowser cards={cards} />;
 }

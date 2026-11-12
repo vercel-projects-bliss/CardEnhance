@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { SettingsForm } from "@/components/settings-form";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -11,12 +11,9 @@ export default function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Preferences for this app will appear here."
+        description="Session options for restore, batch size, and export."
       />
-      <EmptyState
-        title="No settings yet"
-        description="Options will be listed here in a later step."
-      />
+      <SettingsForm />
     </>
   );
 }
