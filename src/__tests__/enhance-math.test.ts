@@ -92,3 +92,23 @@ describe("contrastCurve", () => {
     expect(out[0]).toBeLessThan(64);
   });
 });
+
+import { processEnhance } from "../lib/enhance-math";
+import { defaultStudioSettings } from "../lib/types";
+
+describe("processEnhance sharpness floor", () => {
+  it("does not leave a sharp scan much softer than the resampled input", async () => {
+    const w = 96;
+    const h = 128;
+    const data = edged(w, h);
+    const result = await processEnhance(data, w, h, {
+      ...defaultStudioSettings,
+      adaptive: false,
+      denoise: 0.85,
+      sharpen: 0.2,
+      scale: 1,
+    });
+    expect(result.sharpnessAfter).toBeGreaterThanOrEqual(result.sharpnessBefore * 0.98);
+    expect(result.sharpnessDelta).toBeGreaterThanOrEqual(-5);
+  });
+});

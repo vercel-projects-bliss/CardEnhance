@@ -13,6 +13,7 @@ function runOnWorker(
   worker: Worker,
   image: ImageData,
   settings: StudioSettings,
+  ocrWordCount = 0,
 ): Promise<EnhanceOk> {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
@@ -65,6 +66,7 @@ function runOnWorker(
         height: image.height,
         buffer: copy.buffer,
         settings,
+        ocrWordCount,
       },
       [copy.buffer],
     );
@@ -101,12 +103,12 @@ export function createEnhancePool(size = defaultPoolSize()) {
 
   return {
     size: n,
-    async enhance(image: ImageData, settings: StudioSettings, retries = 1): Promise<EnhanceOk> {
+    async enhance(image: ImageData, settings: StudioSettings, retries = 1, ocrWordCount = 0): Promise<EnhanceOk> {
       let last: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const worker = await acquire();
         try {
-          const result = await runOnWorker(worker, image, settings);
+          const result = await runOnWorker(worker, image, settings, ocrWordCount);
           release(worker);
           return result;
         } catch (err) {

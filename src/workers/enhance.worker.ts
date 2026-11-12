@@ -8,6 +8,7 @@ type InMsg = {
   height: number;
   buffer: ArrayBuffer;
   settings: StudioSettings;
+  ocrWordCount?: number;
 };
 
 async function highQualityScale(
@@ -70,9 +71,9 @@ const ctx = self as unknown as {
 const scaleFn: ScaleFn = highQualityScale;
 
 ctx.onmessage = (event: MessageEvent<InMsg>) => {
-  const { id, width, height, buffer, settings } = event.data;
+  const { id, width, height, buffer, settings, ocrWordCount } = event.data;
   const src = new Uint8ClampedArray(buffer);
-  const classified = classifyCard(src, width, height);
+  const classified = classifyCard(src, width, height, { ocrWordCount: ocrWordCount ?? 0 });
   const adaptiveStats = measureAdaptiveStats(src, width, height);
   const chosen = mapAdaptiveParams(adaptiveStats, classified.cardClass, settings);
   processEnhance(src, width, height, chosen, scaleFn, {

@@ -262,6 +262,8 @@ export function StudioView() {
         adaptiveStats: scan.adaptiveStats ?? null,
         chosenParams: scan.chosenParams ?? scan.settingsUsed ?? settings,
         isLandscape: Boolean(scan.isLandscape),
+        orientationUncertain: Boolean(scan.orientationUncertain),
+        ocrWordCount: scan.ocrWordCount ?? 0,
       }));
     if (!rows.length) return;
     const body = JSON.stringify(
@@ -523,7 +525,7 @@ async function finishPrepared(
   const rectifiedUrl = URL.createObjectURL(rectified);
   ctx.urls.push(rectifiedUrl);
 
-  const enhanced = await enhancePrepared(prepared.image, settings, pool);
+  const enhanced = await enhancePrepared(prepared.image, settings, pool, prepared.ocrWordCount ?? 0);
   ctx.urls.push(enhanced.url);
   const existing = ctx.pixels.get(id);
   ctx.pixels.set(id, { source: existing?.source ?? rectified, processed: enhanced.blob });
@@ -559,6 +561,8 @@ async function finishPrepared(
     cropQuad: prepared.cropQuad,
     cropMargin: prepared.cropMargin,
     isLandscape: prepared.isLandscape,
+    orientationUncertain: prepared.orientationUncertain,
+    ocrWordCount: prepared.ocrWordCount,
     cardClass: enhanced.cardClass ?? null,
     adaptiveStats: enhanced.adaptiveStats ?? null,
     chosenParams: enhanced.chosenParams ?? null,
@@ -910,6 +914,14 @@ function ScanGrid({
                       className="absolute top-2 right-2 z-10 border border-laser/60 bg-background/80 px-1.5 py-0.5 font-mono text-[9px] tracking-wide text-laser"
                     >
                       CHROME / FOIL
+                    </span>
+                  ) : null}
+                  {scan.orientationUncertain ? (
+                    <span
+                      data-testid="orientation-uncertain"
+                      className="absolute bottom-8 left-2 z-10 border border-border bg-background/80 px-1.5 py-0.5 font-mono text-[9px] text-ink-muted"
+                    >
+                      orientation uncertain
                     </span>
                   ) : null}
                   {scan.status === "processing" || scan.status === "queued" ? (

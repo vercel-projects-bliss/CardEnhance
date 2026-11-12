@@ -143,3 +143,24 @@ describe("adaptive param mapping", () => {
     expect(chosen.adaptive).toBe(false);
   });
 });
+
+
+describe("classifier OCR and photo-front guards", () => {
+  it("treats a foil-looking layout with many OCR words as a CARD BACK", () => {
+    const foil = chromeFront();
+    const result = classifyCard(foil.data, foil.w, foil.h, { ocrWordCount: 18 });
+    expect(result.cardClass).toBe("card_back");
+  });
+
+  it("does not tag a colorful photo-like front as a card back when OCR is sparse", () => {
+    const front = matteFront();
+    const result = classifyCard(front.data, front.w, front.h, { ocrWordCount: 2 });
+    expect(result.cardClass).toBe("matte_paper_front");
+  });
+
+  it("still labels a dense monochrome text card as CARD BACK without OCR", () => {
+    const back = cardBack();
+    const result = classifyCard(back.data, back.w, back.h);
+    expect(result.cardClass).toBe("card_back");
+  });
+});

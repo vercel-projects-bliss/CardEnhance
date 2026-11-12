@@ -2,7 +2,8 @@ import { detectCards } from "./detect-sheet";
 import { createEnhancePool, type EnhanceOk } from "./enhance-pool";
 import { encodePng, previewBlob } from "./files";
 import { cropRect, rotateImage } from "./image-ops";
-import { composeRotation, detectOrientation } from "./orient";
+import { composeRotation } from "./orient";
+import { detectOrientationAsync, refine180 } from "./orient-async";
 import { deskewWithMargin, findOuterCardQuad } from "./crop-quad";
 import type { Quad } from "./geometry";
 import type { Rotation, StudioSettings } from "./types";
@@ -17,6 +18,8 @@ export type PreparedCard = {
   rotated: boolean;
   orientationDetected: Rotation;
   orientationApplied: Rotation;
+  orientationUncertain: boolean;
+  ocrWordCount: number;
   cropQuad: Quad | null;
   cropMargin: number | null;
   isLandscape: boolean;
@@ -27,32 +30,29 @@ function stem(name: string) {
 }
 
 /**
- * Orient a scan, split multi-card sheets, then outer-quad crop + deskew
- * each card with a uniform 2–3% margin. Filename is used only for output
- * naming — never for orientation, class, or crop decisions.
+ * Split multi-card sheets first (no page-level 90° guess), then orient each
+ * card with OCR+projection, then outer-quad crop + deskew. Filename is used
+ * only for output naming.
  */
 export async function prepareScan(
   source: ImageData,
   filename: string,
   extraRotation: Rotation = 0,
 ): Promise<PreparedCard[]> {
-  const auto = detectOrientation(source.data, source.width, source.height);
-  const applied = composeRotation(auto.rotation, extraRotation);
-  const oriented = rotateImage(source, applied);
-  let detections = await detectCards(oriented);
+  let detections = await detectCards(source);
   if (!detections.length) {
     detections = [
       {
         cardIndex: 0,
         confidence: 0.4,
-        box: { x: 0, y: 0, w: oriented.width, h: oriented.height },
+        box: { x: 0, y: 0, w: source.width, h: source.height },
         polygon: [
           { x: 0, y: 0 },
-          { x: oriented.width, y: 0 },
-          { x: oriented.width, y: oriented.height },
-          { x: 0, y: oriented.height },
+          { x: source.width, y: 0 },
+          { x: source.width, y: source.height },
+          { x: 0, y: source.height },
         ],
-        centroid: { x: oriented.width / 2, y: oriented.height / 2 },
+        centroid: { x: source.width / 2, y: source.height / 2 },
         detectorMethod: "fullframe",
         warnings: [],
         geometryConfidence: 0.4,
@@ -66,29 +66,32 @@ export async function prepareScan(
   for (const det of detections) {
     const pad = Math.round(Math.min(det.box.w, det.box.h) * 0.06);
     const region = cropRect(
-      oriented,
+      source,
       det.box.x - pad,
       det.box.y - pad,
       det.box.x + det.box.w + pad,
       det.box.y + det.box.h + pad,
     );
-    // Refine 180° (and occasional residual 90°) on the loose card region.
-    const refine = detectOrientation(region.data, region.width, region.height);
-    const regionOriented = rotateImage(region, refine.rotation);
-    const found = findOuterCardQuad(regionOriented);
-    const deskewed = deskewWithMargin(regionOriented, found);
-    const finalOrient = detectOrientation(
-      deskewed.image.data,
-      deskewed.image.width,
-      deskewed.image.height,
-    );
-    const orientationApplied = composeRotation(applied, refine.rotation);
-    const s0 = finalOrient.scores.find((s) => s.rotation === 0);
-    const sideways = Math.max(
-      ...finalOrient.scores.filter((s) => s.rotation === 90 || s.rotation === 270).map((s) => s.score),
-    );
-    const textHorizontal = (s0?.score ?? 0) >= sideways;
-    const isLandscape = deskewed.image.width > deskewed.image.height && textHorizontal;
+    const auto = await detectOrientationAsync(region);
+    const applied = composeRotation(auto.rotation, extraRotation);
+    const oriented = rotateImage(region, applied);
+    const found = findOuterCardQuad(oriented);
+    let deskewed = deskewWithMargin(oriented, found);
+
+    // 0↔180 only — never a 90/270 refine that undoes a confident first pass.
+    const flip = await refine180(deskewed.image, auto);
+    if (flip.rotation === 180) {
+      deskewed = { ...deskewed, image: rotateImage(deskewed.image, 180) };
+    }
+    const orientationApplied = composeRotation(applied, flip.rotation);
+
+    const textHorizontal = !flip.uncertain || auto.source !== "fallback";
+    // Landscape only if the *oriented* card is wider than tall and we believe
+    // the text already reads horizontally (we just oriented it).
+    const isLandscape =
+      deskewed.image.width > deskewed.image.height &&
+      (flip.ocrWordCount >= 2 || auto.ocrWordCount >= 2 || auto.source === "agreed" || auto.source === "ocr") &&
+      !flip.uncertain;
 
     out.push({
       image: deskewed.image,
@@ -99,6 +102,8 @@ export async function prepareScan(
       rotated: orientationApplied !== 0,
       orientationDetected: auto.rotation,
       orientationApplied,
+      orientationUncertain: auto.uncertain && flip.rotation === 0,
+      ocrWordCount: flip.ocrWordCount,
       cropQuad: deskewed.quad,
       cropMargin: deskewed.margin,
       isLandscape,
@@ -117,8 +122,9 @@ export async function enhancePrepared(
   image: ImageData,
   settings: StudioSettings,
   pool: ReturnType<typeof createEnhancePool>,
+  ocrWordCount = 0,
 ): Promise<ProcessedPixels> {
-  const result = await pool.enhance(image, settings, 1);
+  const result = await pool.enhance(image, settings, 1, ocrWordCount);
   const imageData = new ImageData(new Uint8ClampedArray(result.data), result.width, result.height);
   const blob = await encodePng(imageData);
   const preview = await previewBlob(imageData, 360);

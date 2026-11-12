@@ -446,8 +446,9 @@ export async function processEnhance(
   if (descratchAmt > 0 && (!settings.descratchFoilOnly || chromeFoil.isChromeFoil)) {
     data = descratchPixels(data, width, height, descratchAmt, options.edgeProtect ?? 0.05);
   }
-  if (settings.denoise > 0) {
-    data = denoisePixels(data, width, height, settings.denoise);
+  const denoiseAmt = settings.denoise;
+  if (denoiseAmt > 0) {
+    data = denoisePixels(data, width, height, denoiseAmt);
   }
   if (settings.sharpen > 0) {
     data = unsharpMask(data, width, height, settings.sharpen);
@@ -464,8 +465,29 @@ export async function processEnhance(
     before = new Uint8ClampedArray(await scaleFn(original, width, height, out.width, out.height));
   }
 
-  const sharpnessBefore = laplacianVariance(before, out.width, out.height);
-  const sharpnessAfter = laplacianVariance(processed, out.width, out.height);
+  let sharpnessBefore = laplacianVariance(before, out.width, out.height);
+  let sharpnessAfter = laplacianVariance(processed, out.width, out.height);
+  // Adaptive (and manual) enhancement should not leave the card softer than
+  // the resampled input, except as a last resort after a lighter denoise retry.
+  if (sharpnessAfter < sharpnessBefore - 1e-6 && denoiseAmt > 0) {
+    let retry: Uint8ClampedArray = new Uint8ClampedArray(original);
+    if (descratchAmt > 0 && (!settings.descratchFoilOnly || chromeFoil.isChromeFoil)) {
+      retry = descratchPixels(retry, width, height, descratchAmt, options.edgeProtect ?? 0.05);
+    }
+    const light = Math.min(denoiseAmt, 0.08);
+    if (light > 0) retry = denoisePixels(retry, width, height, light);
+    if (settings.sharpen > 0) retry = unsharpMask(retry, width, height, settings.sharpen);
+    if (settings.contrast > 0) retry = contrastCurve(retry, width, height, settings.contrast);
+    let retryOut = retry;
+    if (out.width !== width || out.height !== height) {
+      retryOut = new Uint8ClampedArray(await scaleFn(retry, width, height, out.width, out.height));
+    }
+    const retrySharp = laplacianVariance(retryOut, out.width, out.height);
+    if (retrySharp >= sharpnessAfter) {
+      processed = retryOut;
+      sharpnessAfter = retrySharp;
+    }
+  }
   const sharpnessDelta =
     sharpnessBefore > 1e-12
       ? ((sharpnessAfter - sharpnessBefore) / sharpnessBefore) * 100

@@ -126,6 +126,8 @@ export type EnhanceAudit = {
   adaptiveStats: AdaptiveStats | null;
   chosenParams: StudioSettings;
   isLandscape: boolean;
+  orientationUncertain: boolean;
+  ocrWordCount: number;
 };
 
 export type LocalScan = {
@@ -162,4 +164,6 @@ export type LocalScan = {
   chosenParams?: StudioSettings | null;
   isLandscape?: boolean;
   previewUrl?: string;
+  orientationUncertain?: boolean;
+  ocrWordCount?: number;
 };

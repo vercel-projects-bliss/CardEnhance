@@ -15,6 +15,8 @@ export type ClassifyStats = {
   bimodality: number;
   meanSaturation: number;
   inkValley: number;
+  textLineScore: number;
+  ocrWordCount: number;
 };
 
 export type ClassifyResult = {
@@ -135,11 +137,84 @@ export function textEdgeDensity(gray: Float32Array, w: number, h: number): numbe
   return considered ? hits / considered : 0;
 }
 
-export function classifyCard(data: Uint8ClampedArray, width: number, height: number): ClassifyResult {
+
+/**
+ * Small ink connected-components organized into horizontal rows — a general
+ * "printed text block" cue used for card backs (bios, legal, set lists).
+ */
+export function textLineComponentScore(gray: Float32Array, w: number, h: number): number {
+  if (w < 16 || h < 16) return 0;
+  let sum = 0;
+  for (let i = 0; i < gray.length; i++) sum += gray[i];
+  const mean = sum / gray.length;
+  // Ink is the side of the mean with the smaller share (printed text or dark paper).
+  const inkDark = mean > 110;
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < gray.length; i++) {
+    mask[i] = inkDark ? (gray[i] < mean - 20 ? 1 : 0) : (gray[i] > mean + 20 ? 1 : 0);
+  }
+  const seen = new Uint8Array(w * h);
+  type CC = { minX: number; minY: number; maxX: number; maxY: number; area: number };
+  const ccs: CC[] = [];
+  const maxArea = (w * h) * 0.03;
+  const minArea = 4;
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i] || seen[i]) continue;
+    const stack = [i];
+    seen[i] = 1;
+    let minX = w, minY = h, maxX = 0, maxY = 0, area = 0;
+    while (stack.length) {
+      const p = stack.pop()!;
+      const x = p % w;
+      const y = (p / w) | 0;
+      area++;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      for (const n of [p - 1, p + 1, p - w, p + w]) {
+        if (n < 0 || n >= mask.length || seen[n] || !mask[n]) continue;
+        const nx = n % w;
+        if (Math.abs(nx - x) + Math.abs(((n / w) | 0) - y) !== 1) continue;
+        seen[n] = 1;
+        stack.push(n);
+      }
+    }
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    if (area >= minArea && area <= maxArea && cw < w * 0.6 && ch < h * 0.25) {
+      ccs.push({ minX, minY, maxX, maxY, area });
+    }
+  }
+  if (ccs.length < 12) return ccs.length / 40;
+  // Bucket component centers into horizontal rows.
+  const centers = ccs.map((c) => (c.minY + c.maxY) / 2).sort((a, b) => a - b);
+  const rowTol = Math.max(3, h * 0.025);
+  let rows = 0;
+  let inRow = 1;
+  for (let i = 1; i <= centers.length; i++) {
+    const split = i === centers.length || centers[i] - centers[i - 1] > rowTol;
+    if (split) {
+      if (inRow >= 4) rows++;
+      inRow = 1;
+    } else inRow++;
+  }
+  const density = Math.min(1, ccs.length / 80);
+  const rowCue = Math.min(1, rows / 8);
+  return 0.5 * density + 0.5 * rowCue;
+}
+
+export function classifyCard(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: { ocrWordCount?: number } = {},
+): ClassifyResult {
   const ds = downsample(data, width, height, 280);
   const gray = lumaPlane255(ds.data, ds.w, ds.h);
   const { bimodality, valley } = histogramBimodality(gray);
   const text = textEdgeDensity(gray, ds.w, ds.h);
+  const textLines = textLineComponentScore(gray, ds.w, ds.h);
   let sat = 0;
   const n = ds.w * ds.h;
   for (let i = 0; i < n; i++) {
@@ -147,19 +222,31 @@ export function classifyCard(data: Uint8ClampedArray, width: number, height: num
     sat += saturation(ds.data[p], ds.data[p + 1], ds.data[p + 2]);
   }
   sat /= n || 1;
+  const ocrWordCount = Math.max(0, opts.ocrWordCount ?? 0);
   const stats: ClassifyStats = {
     textEdgeDensity: text,
     bimodality,
     meanSaturation: sat,
     inkValley: valley,
+    textLineScore: textLines,
+    ocrWordCount,
   };
-  // Card backs: dense text-like edges AND a bimodal ink/paper histogram.
-  // High-contrast monochrome backs must never be tagged chrome.
-  const backCue = (text >= 0.06 && bimodality >= 0.32) || (text >= 0.1 && bimodality >= 0.2);
-  const monoBack = sat < 0.22 && bimodality >= 0.35 && text >= 0.045;
-  if (backCue || monoBack) {
+
+  // Card backs: text-dense, often bimodal / low-chroma, with words in rows.
+  // OCR word count is a strong prior (bios, legal lines) and blocks chrome.
+  const lowChroma = sat < 0.22;
+  const inkBack = (bimodality >= 0.28 && text >= 0.05) || (lowChroma && bimodality >= 0.32);
+  const lineBack = textLines >= 0.45 && (text >= 0.05 || bimodality >= 0.22);
+  const ocrBack = ocrWordCount >= 8 && (textLines >= 0.25 || text >= 0.045 || bimodality >= 0.2 || lowChroma);
+  const strongOcrBack = ocrWordCount >= 12;
+  // Photo fronts typically yield only a few tokens (name, brand). Do not
+  // call them backs from weak edge/bimodal cues alone when OCR is sparse.
+  const photoLike = ocrWordCount <= 3 && textLines < 0.4 && sat >= 0.16;
+  const isBack = !photoLike && (strongOcrBack || ocrBack || (inkBack && lineBack) || (inkBack && ocrWordCount >= 5));
+  if (isBack) {
     return { cardClass: "card_back", stats };
   }
+
   const chrome = detectChromeFoil(ds.data, ds.w, ds.h);
   if (chrome.isChromeFoil) {
     return { cardClass: "chrome_foil_front", stats };

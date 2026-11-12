@@ -119,6 +119,61 @@ function nmsBoxes<T extends { x: number; y: number; w: number; h: number; score:
   return kept;
 }
 
+
+export type SheetBox = { x: number; y: number; w: number; h: number; score: number };
+
+/**
+ * A sheet must have ≥2 non-overlapping, similar-size, valid-aspect card
+ * quads. Nested/nameplate boxes and a near-full-frame box plus one card
+ * do not count (that was the tilted table false split).
+ */
+export function selectSheetBoxes<T extends SheetBox>(
+  boxes: T[],
+  imageW: number,
+  imageH: number,
+): T[] {
+  const area = imageW * imageH;
+  const overlap = (a: T, b: T) => {
+    const x0 = Math.max(a.x, b.x);
+    const y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w);
+    const y1 = Math.min(a.y + a.h, b.y + b.h);
+    return Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+  };
+  const contained = (inner: T, outer: T) => {
+    const inter = overlap(inner, outer);
+    const ia = inner.w * inner.h;
+    return ia > 0 && inter / ia >= 0.7;
+  };
+
+  let candidates = boxes.filter((b) => {
+    const frac = (b.w * b.h) / area;
+    return frac >= 0.03 && frac <= 0.62 && isValidCardAspect(b.w, b.h);
+  });
+
+  // Drop a box that sits inside a larger candidate (nameplates, inner frames).
+  candidates = candidates.filter((b, i) => {
+    return !candidates.some((o, j) => i !== j && contained(b, o) && o.w * o.h > b.w * b.h);
+  });
+
+  if (candidates.length < 2) return [];
+
+  // Size consistency: keep the largest cluster whose areas stay within ~2.5×.
+  const sorted = [...candidates].sort((a, b) => a.w * a.h - b.w * b.h);
+  let best: T[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const cluster = [sorted[i]];
+    const base = sorted[i].w * sorted[i].h;
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[j].w * sorted[j].h;
+      if (a <= base * 2.5 && a >= base / 2.5) cluster.push(sorted[j]);
+      else break;
+    }
+    if (cluster.length > best.length) best = cluster;
+  }
+  return best.length >= 2 ? best : [];
+}
+
 export async function detectCards(source: ImageData): Promise<CardDetection[]> {
   const yolo = await detectCardBoxes(source);
   let boxes: Array<{ x: number; y: number; w: number; h: number; score: number; method: CardDetection["detectorMethod"] }> = yolo.boxes.map(
@@ -139,12 +194,8 @@ export async function detectCards(source: ImageData): Promise<CardDetection[]> {
   // Merge YOLO + contour candidates, then decide sheet vs single card.
   // Never skip crop on a "already a card" area shortcut — even a 60–90%
   // fill still needs outer-quad deskew and a uniform margin.
-  const merged = nmsBoxes([...boxes, ...blobs], 0.55);
-  const area = source.width * source.height;
-  const distinct = merged.filter((b) => {
-    const frac = (b.w * b.h) / area;
-    return frac >= 0.03 && frac <= 0.72 && isValidCardAspect(b.w, b.h);
-  });
+  const merged = nmsBoxes([...boxes, ...blobs], 0.45);
+  const distinct = selectSheetBoxes(merged, source.width, source.height);
   if (distinct.length >= 2) {
     boxes = distinct;
   } else {
