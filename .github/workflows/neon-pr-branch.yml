@@ -24,9 +24,6 @@ jobs:
 
   create_neon_branch:
     name: Create Neon Branch
-    outputs:
-      db_url: ${{ steps.create_neon_branch.outputs.db_url }}
-      db_url_with_pooler: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
     needs: setup
     if: |
       github.event_name == 'pull_request' && (
@@ -61,7 +58,7 @@ jobs:
       - name: Run Migrations
         run: npm run db:migrate
         env:
-          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url_pooled }}
       - name: Post Schema Diff Comment to PR
         uses: neondatabase/schema-diff-action@v1
         with:
