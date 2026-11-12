@@ -278,6 +278,9 @@ export function StudioView() {
         appliedParams: scan.appliedParams ?? null,
         orientationSource: scan.orientationSource ?? null,
         orientationConfidence: scan.orientationConfidence ?? null,
+        clipReady: scan.clipReady,
+        clipError: scan.clipError ?? null,
+        visionBackend: scan.visionBackend ?? null,
       }));
     if (!rows.length) return;
     const body = JSON.stringify(
@@ -578,6 +581,9 @@ async function finishCard(
     },
     orientationSource: audit.orientationSource,
     orientationConfidence: audit.orientationConfidence,
+    clipReady: audit.clipReady,
+    clipError: audit.clipError ?? null,
+    visionBackend: audit.visionBackend ?? null,
     cardIndex: card.cardIndex,
   });
 }
@@ -888,12 +894,12 @@ function ScanGrid({
         const params = scan.chosenParams;
 
         return (
-          <li key={scan.id} className={landscape ? "col-span-2 flex" : "col-span-1 flex"}>
+          <li key={scan.id} className={(landscape ? "col-span-2 flex" : "col-span-1 flex") + " min-w-0"}>
             <div
               className={
                 scan.selected
-                  ? "glow-box flex w-full flex-col bg-surface text-left"
-                  : "flex w-full flex-col border border-border bg-surface text-left opacity-60 transition-opacity hover:opacity-90"
+                  ? "glow-box flex w-full min-w-0 flex-col overflow-hidden bg-surface text-left"
+                  : "flex w-full min-w-0 flex-col overflow-hidden border border-border bg-surface text-left opacity-60 transition-opacity hover:opacity-90"
               }
             >
               <button
@@ -982,10 +988,10 @@ function ScanGrid({
                   ) : null}
                 </div>
               </button>
-              <div className="mt-auto flex border-t border-border">
+              <div className="mt-auto grid w-full min-w-0 grid-cols-3 border-t border-border">
                 <button
                   type="button"
-                  className={btnGhost + " h-8 flex-1"}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 overflow-hidden border-0 px-0.5 font-mono text-[10px] tracking-wide text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="rotate-ccw"
                   disabled={disabled}
                   aria-label={`Rotate ${scan.name} 90 degrees counter-clockwise`}
@@ -999,7 +1005,7 @@ function ScanGrid({
                 </button>
                 <button
                   type="button"
-                  className={btnGhost + " h-8 flex-1"}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 overflow-hidden border-0 px-0.5 font-mono text-[10px] tracking-wide text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="rotate-cw"
                   disabled={disabled}
                   aria-label={`Rotate ${scan.name} 90 degrees clockwise`}
@@ -1013,7 +1019,7 @@ function ScanGrid({
                 </button>
                 <button
                   type="button"
-                  className={btnGhost + " h-8 flex-1"}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 overflow-hidden border-0 px-0.5 font-mono text-[10px] tracking-wide text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="rotate-180"
                   disabled={disabled}
                   aria-label={`Rotate ${scan.name} 180 degrees`}

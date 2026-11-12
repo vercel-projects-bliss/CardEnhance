@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
       fs: false,
       path: false,
       crypto: false,
+      "onnxruntime-node": false,
+      child_process: false,
     };
     return config;
   },

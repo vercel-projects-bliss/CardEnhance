@@ -10,6 +10,7 @@ import {
 } from "../lib/adaptiveCardPipeline";
 import {
   createOnnxCardVisionAdapters,
+  getOnnxVisionStatus,
   type OnnxVisionModelUrls,
 } from "../lib/onnxCardVision";
 
@@ -84,6 +85,15 @@ async function ensureModelsLoaded(urls?: OnnxVisionModelUrls): Promise<void> {
   await initPromise;
 }
 
+
+function stampVisionStatus(audit: AdaptiveAuditMetrics): AdaptiveAuditMetrics {
+  const status = getOnnxVisionStatus();
+  audit.clipReady = status.clip;
+  audit.clipError = status.clipError;
+  audit.visionBackend = status.backend;
+  return audit;
+}
+
 async function handleMessage(request: EnhanceWorkerRequest): Promise<void> {
   try {
     if (!request || typeof request !== "object") {
@@ -119,7 +129,7 @@ async function handleMessage(request: EnhanceWorkerRequest): Promise<void> {
         type: "card.enhance.result",
         id: request.id,
         image,
-        audit: result.audit,
+        audit: stampVisionStatus(result.audit),
       };
       workerScope.postMessage(response, [image.data.buffer]);
       return;
@@ -150,7 +160,7 @@ async function handleMessage(request: EnhanceWorkerRequest): Promise<void> {
           index: slice.index,
           bounds: slice.bounds,
           image,
-          audit: result.audit,
+          audit: stampVisionStatus(result.audit),
         });
         transferables.push(image.data.buffer);
       }

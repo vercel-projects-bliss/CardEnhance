@@ -38,6 +38,36 @@ const YUNET_FALLBACK_URLS = [
 
 const MODEL_CACHE_NAME = "cardenhance-onnx-models-v1";
 
+// @huggingface/transformers@3.8.1 depends on onnxruntime-web@1.22.0-dev, not the
+// app's vendored 1.21.0 /ort files. Point its wasm loader at the matching CDN.
+const TRANSFORMERS_ORT_WASM =
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
+
+export type OnnxVisionStatus = {
+  yunet: boolean;
+  docOri: boolean;
+  clip: boolean;
+  clipError: string | null;
+  backend: "wasm" | "webgpu";
+};
+
+const visionStatus: OnnxVisionStatus = {
+  yunet: false,
+  docOri: false,
+  clip: false,
+  clipError: null,
+  backend: "wasm",
+};
+
+export function getOnnxVisionStatus(): OnnxVisionStatus {
+  return { ...visionStatus };
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -103,17 +133,93 @@ function configureOrtWasm(): void {
   ort.env.wasm.proxy = false;
 }
 
+/**
+ * Probe WebGPU in a *separate* worker so a hung requestAdapter / software
+ * adapter cannot block this enhance worker's thread. Time out and terminate
+ * the probe if it does not answer.
+ */
+async function probeWebGpu(timeoutMs = 2500): Promise<boolean> {
+  if (typeof Worker === "undefined") return false;
+  const nav = globalThis as unknown as { navigator?: { gpu?: unknown } };
+  if (!nav.navigator || !("gpu" in nav.navigator)) return false;
+  const source = `self.onmessage = async () => {
+    try {
+      const gpu = self.navigator && self.navigator.gpu;
+      if (!gpu || typeof gpu.requestAdapter !== "function") {
+        self.postMessage({ ok: false });
+        return;
+      }
+      const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+      if (!adapter || adapter.isFallbackAdapter) {
+        self.postMessage({ ok: false });
+        return;
+      }
+      let info = {};
+      try { info = adapter.info || (await adapter.requestAdapterInfo?.()) || {}; } catch (e) { /* ignore */ }
+      const blob = JSON.stringify(info).toLowerCase();
+      if (/swiftshader|llvmpipe|software|microsoft basic render/.test(blob)) {
+        self.postMessage({ ok: false });
+        return;
+      }
+      self.postMessage({ ok: true });
+    } catch (err) {
+      self.postMessage({ ok: false });
+    }
+  };`;
+  let worker: Worker | null = null;
+  let url: string | null = null;
+  try {
+    url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    worker = new Worker(url);
+    const ok = await withTimeout(
+      new Promise<boolean>((resolve, reject) => {
+        worker!.onmessage = (event: MessageEvent<{ ok?: boolean }>) => resolve(Boolean(event.data?.ok));
+        worker!.onerror = (event) => reject(event.error ?? new Error(event.message || "webgpu probe failed"));
+        worker!.postMessage("probe");
+      }),
+      timeoutMs,
+      "webgpu probe",
+    );
+    return ok;
+  } catch {
+    return false;
+  } finally {
+    try {
+      worker?.terminate();
+    } catch {
+      // ignore
+    }
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
+let webGpuDecision: Promise<boolean> | null = null;
+
+function webGpuAllowed(): Promise<boolean> {
+  if (!webGpuDecision) webGpuDecision = probeWebGpu();
+  return webGpuDecision;
+}
+
 async function createBestSession(modelBytes: Uint8Array): Promise<OrtSession> {
   configureOrtWasm();
-  // Product intent is WebGPU with WASM fallback, but onnxruntime-web's webgpu
-  // provider can block the worker thread indefinitely on software/SwiftShader
-  // adapters so Promise timeouts never fire. Always create the session with WASM
-  // (the official /ort WASM is already vendored). A later pass can opt into
-  // WebGPU on a discrete adapter from a dedicated watchdog worker.
-  return ort.InferenceSession.create(modelBytes, {
-    executionProviders: ["wasm"],
-    graphOptimizationLevel: "all",
-  });
+  const wasmOptions = {
+    executionProviders: ["wasm"] as const,
+    graphOptimizationLevel: "all" as const,
+  };
+  if (await webGpuAllowed()) {
+    try {
+      const session = await ort.InferenceSession.create(modelBytes, {
+        executionProviders: ["webgpu"],
+        graphOptimizationLevel: "all",
+      });
+      visionStatus.backend = "webgpu";
+      return session;
+    } catch (err) {
+      console.warn("WebGPU session failed; using WASM.", errorMessage(err));
+    }
+  }
+  visionStatus.backend = "wasm";
+  return ort.InferenceSession.create(modelBytes, wasmOptions);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +253,7 @@ function letterboxBgr640(rgba: Uint8ClampedArray, w: number, h: number): Float32
 function scoreYuNetOutputs(outputs: OrtOutputMap): number {
   const strides = [8, 16, 32] as const;
   let bestUprightScore = 0;
+  let bestInvertedScore = 0;
 
   for (const s of strides) {
     const clsT = outputs[`cls_${s}`];
@@ -165,7 +272,8 @@ function scoreYuNetOutputs(outputs: OrtOutputMap): number {
         const cVal = cls[idx] > 1 || cls[idx] < 0 ? 1 / (1 + Math.exp(-cls[idx])) : cls[idx];
         const oVal = obj[idx] > 1 || obj[idx] < 0 ? 1 / (1 + Math.exp(-obj[idx])) : obj[idx];
         const conf = Math.sqrt(Math.max(0, cVal * oVal));
-        if (conf < 0.45) continue;
+        // Lower than 0.45 so softer / illustrated / matte faces still vote.
+        if (conf < 0.28) continue;
 
         const base = idx * 10;
         const rEyeX = (c + kps[base]) * s;
@@ -180,22 +288,20 @@ function scoreYuNetOutputs(outputs: OrtOutputMap): number {
         const mouthMidY = 0.5 * (rMouthY + lMouthY);
         const eyeSpan = Math.hypot(lEyeX - rEyeX, lEyeY - rEyeY);
         const eyeTilt = Math.abs(lEyeY - rEyeY);
+        if (eyeSpan <= 5 || eyeTilt > eyeSpan * 0.7) continue;
 
-        // Strict anatomical uprightness: eyes level, nose below eyes, mouth below nose
-        if (
-          eyeSpan > 6 &&
-          mouthMidY > noseY &&
-          noseY > eyeMidY &&
-          mouthMidY - eyeMidY > eyeSpan * 0.42 &&
-          eyeTilt < eyeSpan * 0.65 &&
-          lEyeX > rEyeX - eyeSpan * 0.2
-        ) {
+        const vertical = mouthMidY - eyeMidY;
+        // Upright: eyes above mouth (y increases downward). Inverted: mouth above eyes.
+        if (mouthMidY > noseY && noseY > eyeMidY && vertical > eyeSpan * 0.28) {
           if (conf > bestUprightScore) bestUprightScore = conf;
+        } else if (eyeMidY > noseY && noseY > mouthMidY && -vertical > eyeSpan * 0.28) {
+          if (conf > bestInvertedScore) bestInvertedScore = conf;
         }
       }
     }
   }
-  return bestUprightScore;
+  // Eyes-above-mouth wins; an inverted face on this rotation is a negative vote.
+  return Math.max(0, Math.min(1, bestUprightScore - 0.65 * bestInvertedScore));
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +352,151 @@ function extractClassZeroProb(raw: Float32Array): number {
 }
 
 // ---------------------------------------------------------------------------
+// CLIP: image encoder + precomputed text embeddings (class + upright/inverted)
+// ---------------------------------------------------------------------------
+const CLASS_PROMPT_ENTRIES: Array<{ prompt: string; profile: CardSurfaceProfile }> = [
+  {
+    prompt: "the back of a sports trading card with biography paragraphs, statistics, and copyright fine print",
+    profile: "CARD_BACK",
+  },
+  {
+    prompt: "the front of a shiny metallic chrome or holographic foil trading card",
+    profile: "CHROME_FOIL",
+  },
+  {
+    prompt: "the front of a clear acetate or dark black-background trading card",
+    profile: "DARK_ACETATE_FOIL",
+  },
+  {
+    prompt: "the front of a matte paper photograph trading card",
+    profile: "MATTE_RELIC",
+  },
+  {
+    prompt: "the front of a fabric jersey patch or relic memorabilia trading card",
+    profile: "MATTE_RELIC",
+  },
+];
+
+const UPRIGHT_PROMPT = "an upright trading card, right side up";
+const INVERTED_PROMPT = "an upside-down trading card, rotated 180 degrees";
+
+type ClipHandle = {
+  embedImage: (rgba: Uint8ClampedArray, width: number, height: number) => Promise<Float32Array>;
+  classEmbeds: Float32Array[];
+  classProfiles: CardSurfaceProfile[];
+  uprightEmbed: Float32Array;
+  invertedEmbed: Float32Array;
+};
+
+function l2Normalize(vec: Float32Array): Float32Array {
+  let sum = 0;
+  for (let i = 0; i < vec.length; i++) sum += vec[i] * vec[i];
+  const inv = sum > 0 ? 1 / Math.sqrt(sum) : 1;
+  const out = new Float32Array(vec.length);
+  for (let i = 0; i < vec.length; i++) out[i] = vec[i] * inv;
+  return out;
+}
+
+function dot(a: Float32Array, b: Float32Array): number {
+  const n = Math.min(a.length, b.length);
+  let s = 0;
+  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+
+function softmax(logits: number[]): number[] {
+  const max = Math.max(...logits);
+  const exps = logits.map((v) => Math.exp(v - max));
+  const sum = exps.reduce((a, b) => a + b, 0) || 1;
+  return exps.map((v) => v / sum);
+}
+
+function configureTransformersEnv(env: typeof import("@huggingface/transformers").env): void {
+  // Bundled workers can look like Node (stubbed fs/path) and then fail looking for local models.
+  env.allowLocalModels = false;
+  env.allowRemoteModels = true;
+  env.useBrowserCache = true;
+  env.useFS = false;
+  env.useFSCache = false;
+  const onnx = env.backends.onnx as { wasm?: { wasmPaths?: string; numThreads?: number; proxy?: boolean; simd?: boolean } };
+  onnx.wasm = onnx.wasm ?? {};
+  // transformers.js 3.8.1 vendors onnxruntime-web 1.22.0-dev — do not point it at /ort (1.21.0).
+  onnx.wasm.wasmPaths = TRANSFORMERS_ORT_WASM;
+  onnx.wasm.numThreads = 1;
+  onnx.wasm.proxy = false;
+  onnx.wasm.simd = true;
+}
+
+function toFloatEmbed(raw: unknown): Float32Array {
+  if (raw instanceof Float32Array) return l2Normalize(raw);
+  if (Array.isArray(raw) && raw[0] instanceof Float32Array) return l2Normalize(raw[0]);
+  if (raw && typeof raw === "object" && "data" in (raw as object)) {
+    const data = (raw as { data: ArrayLike<number> }).data;
+    return l2Normalize(Float32Array.from(data));
+  }
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    if (Array.isArray(first) || first instanceof Float32Array) {
+      return l2Normalize(Float32Array.from(first as ArrayLike<number>));
+    }
+    return l2Normalize(Float32Array.from(raw as number[]));
+  }
+  throw new Error("Unexpected CLIP embedding shape");
+}
+
+async function loadClipEncoder(modelId: string): Promise<ClipHandle> {
+  const transformers = await import("@huggingface/transformers");
+  configureTransformersEnv(transformers.env);
+
+  const tokenizer = await transformers.AutoTokenizer.from_pretrained(modelId);
+  const processor = await transformers.AutoProcessor.from_pretrained(modelId);
+  const textModel = await transformers.CLIPTextModelWithProjection.from_pretrained(modelId, { dtype: "q8" });
+  const visionModel = await transformers.CLIPVisionModelWithProjection.from_pretrained(modelId, { dtype: "q8" });
+
+  const allPrompts = [...CLASS_PROMPT_ENTRIES.map((e) => e.prompt), UPRIGHT_PROMPT, INVERTED_PROMPT];
+  const textInputs = tokenizer(allPrompts, { padding: true, truncation: true });
+  const textOut = (await textModel(textInputs)) as { text_embeds?: unknown };
+  const textEmbedsRaw = textOut.text_embeds;
+  if (!textEmbedsRaw) throw new Error("CLIP text model did not return text_embeds");
+
+  const rows: Float32Array[] = [];
+  if (textEmbedsRaw instanceof Float32Array) {
+    const dim = textEmbedsRaw.length / allPrompts.length;
+    if (!Number.isInteger(dim) || dim < 8) throw new Error("Unexpected packed CLIP text embedding size");
+    for (let i = 0; i < allPrompts.length; i++) {
+      rows.push(l2Normalize(textEmbedsRaw.slice(i * dim, (i + 1) * dim)));
+    }
+  } else if (Array.isArray(textEmbedsRaw)) {
+    for (const row of textEmbedsRaw) rows.push(toFloatEmbed(row));
+  } else if (typeof textEmbedsRaw === "object" && textEmbedsRaw && "data" in textEmbedsRaw && "dims" in textEmbedsRaw) {
+    const tensor = textEmbedsRaw as { data: ArrayLike<number>; dims: number[] };
+    const data = Float32Array.from(tensor.data);
+    const dim = tensor.dims[tensor.dims.length - 1];
+    const count = data.length / dim;
+    for (let i = 0; i < count; i++) rows.push(l2Normalize(data.slice(i * dim, (i + 1) * dim)));
+  } else {
+    throw new Error("Unrecognized CLIP text_embeds format");
+  }
+  if (rows.length !== allPrompts.length) {
+    throw new Error(`Expected ${allPrompts.length} text embeddings, got ${rows.length}`);
+  }
+
+  return {
+    classEmbeds: rows.slice(0, CLASS_PROMPT_ENTRIES.length),
+    classProfiles: CLASS_PROMPT_ENTRIES.map((e) => e.profile),
+    uprightEmbed: rows[rows.length - 2],
+    invertedEmbed: rows[rows.length - 1],
+    async embedImage(rgba, width, height) {
+      const image = new transformers.RawImage(new Uint8ClampedArray(rgba), width, height, 4);
+      const inputs = await processor(image);
+      const out = (await visionModel(inputs)) as { image_embeds?: unknown };
+      if (!out.image_embeds) throw new Error("CLIP vision model did not return image_embeds");
+      return toFloatEmbed(out.image_embeds);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Factory: Create Cached Browser Vision Ensemble
 // ---------------------------------------------------------------------------
 export async function createOnnxCardVisionAdapters(
@@ -254,8 +505,7 @@ export async function createOnnxCardVisionAdapters(
   const cfg = { ...DEFAULT_MODEL_URLS, ...urls };
   let yunetSession: OrtSession | null = null;
   let docOriSession: OrtSession | null = null;
-  let clipClassifier: ((img: unknown, labels: string[]) => Promise<Array<{ label: string; score: number }>>) | null =
-    null;
+  let clipHandle: ClipHandle | null = null;
 
   const [yunetBytes, docBytes] = await Promise.all([
     cfg.yunetFaceUrl
@@ -270,41 +520,29 @@ export async function createOnnxCardVisionAdapters(
   if (yunetBytes) yunetSession = await createBestSession(yunetBytes).catch(() => null);
   if (docBytes) docOriSession = await createBestSession(docBytes).catch(() => null);
 
-  // Lazy load quantized q8 CLIP via @huggingface/transformers if installed
   const ensureClip = async () => {
-    if (clipClassifier || !cfg.clipModelId) return clipClassifier;
-    try {
-      const transformers = await import("@huggingface/transformers");
-      const pipe = await transformers.pipeline(
-        "zero-shot-image-classification",
-        cfg.clipModelId,
-        { dtype: "q8" },
-      );
-      clipClassifier = pipe as unknown as typeof clipClassifier;
-    } catch {
-      clipClassifier = null;
+    if (clipHandle) return clipHandle;
+    if (!cfg.clipModelId) {
+      visionStatus.clipError = "No CLIP model id configured";
+      return null;
     }
-    return clipClassifier;
+    try {
+      clipHandle = await loadClipEncoder(cfg.clipModelId);
+      visionStatus.clip = true;
+      visionStatus.clipError = null;
+    } catch (err) {
+      clipHandle = null;
+      visionStatus.clip = false;
+      visionStatus.clipError = errorMessage(err);
+      console.error("CLIP init failed", visionStatus.clipError);
+    }
+    return clipHandle;
   };
-
-  const CARD_PROMPTS: Record<string, CardSurfaceProfile> = {
-    "the back side of a sports trading card with biography paragraphs, stats, and fine print copyright text":
-      "CARD_BACK",
-    "a shiny metallic chrome refractor or holographic rainbow foil trading card front":
-      "CHROME_FOIL",
-    "a dark black background or clear transparent acetate trading card front":
-      "DARK_ACETATE_FOIL",
-    "a flat matte paper trading card front or fabric jersey patch relic card":
-      "MATTE_RELIC",
-  };
-  const PROMPT_LABELS = Object.keys(CARD_PROMPTS);
 
   await ensureClip();
-  console.info("onnx card vision ready", {
-    yunet: Boolean(yunetSession),
-    docOri: Boolean(docOriSession),
-    clip: Boolean(clipClassifier),
-  });
+  visionStatus.yunet = Boolean(yunetSession);
+  visionStatus.docOri = Boolean(docOriSession);
+  console.info("onnx card vision ready", getOnnxVisionStatus());
 
   return {
     scoreUprightFace: yunetSession
@@ -328,17 +566,31 @@ export async function createOnnxCardVisionAdapters(
         }
       : undefined,
 
+    scoreUprightClip: async (rgba, width, height) => {
+      const clip = await ensureClip();
+      if (!clip) return 0;
+      const image = await clip.embedImage(rgba, width, height);
+      const probs = softmax([dot(image, clip.uprightEmbed) * 100, dot(image, clip.invertedEmbed) * 100]);
+      return probs[0];
+    },
+
     classifyCardSemantics: async (rgba, width, height) => {
-      const clf = await ensureClip();
-      if (!clf) return {};
-      const transformers = await import("@huggingface/transformers");
-      const rawImg = new transformers.RawImage(new Uint8ClampedArray(rgba), width, height, 4);
-      const preds = await clf(rawImg, PROMPT_LABELS);
+      const clip = await ensureClip();
+      if (!clip) return {};
+      const image = await clip.embedImage(rgba, width, height);
+      const logits = clip.classEmbeds.map((emb) => dot(image, emb) * 100);
+      const probs = softmax(logits);
       const scores: Partial<Record<CardSurfaceProfile, number>> = {};
-      for (const p of preds) {
-        const mapped = CARD_PROMPTS[p.label];
-        if (mapped) scores[mapped] = p.score;
+      for (let i = 0; i < probs.length; i++) {
+        const profile = clip.classProfiles[i];
+        scores[profile] = Math.max(scores[profile] ?? 0, probs[i]);
       }
+      // matte + relic were separate prompts; use their combined mass for MATTE_RELIC
+      const matteMass = clip.classProfiles.reduce(
+        (sum, profile, i) => sum + (profile === "MATTE_RELIC" ? probs[i] : 0),
+        0,
+      );
+      if (matteMass > 0) scores.MATTE_RELIC = matteMass;
       return scores;
     },
   };

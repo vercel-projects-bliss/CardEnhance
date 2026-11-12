@@ -148,6 +148,9 @@ export type EnhanceAudit = {
   appliedParams?: AppliedParams | null;
   orientationSource?: string | null;
   orientationConfidence?: number | null;
+  clipReady?: boolean;
+  clipError?: string | null;
+  visionBackend?: "wasm" | "webgpu" | null;
 };
 
 
@@ -191,5 +194,8 @@ export type LocalScan = {
   appliedParams?: AppliedParams | null;
   orientationSource?: string | null;
   orientationConfidence?: number | null;
+  clipReady?: boolean;
+  clipError?: string | null;
+  visionBackend?: "wasm" | "webgpu" | null;
 };
 

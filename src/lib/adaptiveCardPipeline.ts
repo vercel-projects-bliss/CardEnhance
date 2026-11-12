@@ -39,6 +39,16 @@ export interface CardVisionAdapters {
     height: number,
   ) => Promise<Partial<Record<CardSurfaceProfile, number>>>;
   /**
+   * Probability (0..1) that an already-rotated candidate is right-side up,
+   * from CLIP upright-vs-upside-down prompts. Used as a 0↔180 tiebreaker.
+   */
+  scoreUprightClip?: (
+    rgba: Uint8ClampedArray,
+    width: number,
+    height: number,
+    candidateDeg: RotationQuadrant,
+  ) => Promise<number>;
+  /**
    * Last-resort OCR confidence hook (0..100). Invoked ONLY when face + doc ensemble
    * confidence is low, preventing bulk OCR slowdowns.
    */
@@ -75,7 +85,7 @@ export interface AdaptiveAuditMetrics {
   appliedRotationDeg: RotationQuadrant;
   orientationConfidence: number;
   orientationUncertain: boolean;
-  orientationSource: "manual" | "face+doc" | "face" | "doc" | "ocr" | "heuristic";
+  orientationSource: "manual" | "face+doc" | "face" | "doc" | "ocr" | "heuristic" | "clip" | "face+clip" | "doc+clip";
   deskewAngleDeg: number;
   wasWideBedCropped: boolean;
   cisStreaksRemoved: number;
@@ -94,6 +104,9 @@ export interface AdaptiveAuditMetrics {
   sharpnessBefore: number;
   sharpnessAfter: number;
   sharpnessDeltaPct: number;
+  clipReady?: boolean;
+  clipError?: string | null;
+  visionBackend?: "wasm" | "webgpu";
 }
 
 export interface AdaptivePipelineResult {
@@ -1219,15 +1232,16 @@ async function resolveUprightOrientation(
 
   const maxFace = Math.max(...evals.map((e) => e.face));
   const maxDoc = Math.max(...evals.map((e) => e.doc));
-  const hasFaceSignal = maxFace >= 0.52;
+  // Lower than 0.52: illustrated / matte faces often land in the 0.30–0.50 band.
+  const hasFaceSignal = maxFace >= 0.30;
   const hasDocSignal = maxDoc >= 0.45;
 
   for (const e of evals) {
     if (hasFaceSignal && hasDocSignal) {
-      // Athlete fronts: YuNet upright face landmarks dominate, doc-ori assists on text banners
-      e.combined = e.face * 0.68 + e.doc * 0.25 + e.heuristic * 0.07;
+      // Athlete fronts: YuNet upright face (eyes above mouth) dominates.
+      e.combined = e.face * 0.78 + e.doc * 0.15 + e.heuristic * 0.07;
     } else if (hasFaceSignal) {
-      e.combined = e.face * 0.85 + e.heuristic * 0.15;
+      e.combined = e.face * 0.88 + e.heuristic * 0.12;
     } else if (hasDocSignal) {
       // Text-heavy card backs / faceless inserts: PP-LCNet doc-ori dominates
       e.combined = e.doc * 0.84 + e.heuristic * 0.16;
@@ -1247,7 +1261,31 @@ async function resolveUprightOrientation(
           ? "doc"
           : "heuristic";
 
-  // Strictly gated OCR tiebreaker: runs ONLY when neural ensemble is ambiguous!
+  // CLIP upright-vs-upside-down tiebreaker for residual 0↔180 flips, or a weak ensemble.
+  const topTwoAreOpposites = Math.abs((evals[0].deg - evals[1].deg + 360) % 360) === 180;
+  if (
+    opts.scoreUprightClip &&
+    (evals[0].combined < 0.56 || margin < 0.14 || (topTwoAreOpposites && !hasFaceSignal))
+  ) {
+    const clipThumb = downsampleNearest(img, 336, 16);
+    const targets = new Set<RotationQuadrant>([evals[0].deg, evals[1].deg]);
+    for (const e of evals) {
+      if (!targets.has(e.deg)) continue;
+      const candidate = rotateQuadrant(clipThumb, e.deg);
+      try {
+        const s = await opts.scoreUprightClip(candidate.rgba, candidate.width, candidate.height, e.deg);
+        e.combined = e.combined * 0.5 + (Number.isFinite(s) ? clamp(s, 0, 1) : 0) * 0.5;
+      } catch {
+        // keep ensemble score
+      }
+    }
+    evals.sort((a, b) => b.combined - a.combined);
+    margin = evals[0].combined - evals[1].combined;
+    source = hasFaceSignal ? "face+clip" : hasDocSignal ? "doc+clip" : "clip";
+  }
+
+  // Strictly gated OCR tiebreaker: runs ONLY when face + doc ensemble
+  // (and CLIP, if it ran) is still ambiguous.
   if (opts.ocrOrientationScore && (evals[0].combined < 0.56 || margin < 0.11)) {
     const ocrBase = downsampleNearest(img, 1280, 16);
     for (const e of evals) {
@@ -1371,19 +1409,43 @@ async function classifyCardSurface(
   }
   const bimodalRatio = extremeCount / Math.max(1, sorted.length);
 
-  // Physical scores per class (0..1)
+  // If a dark scanner bed / table frames a lighter card, score surface on the interior.
+  const frameBand = Math.max(2, Math.round(Math.min(width, height) * 0.08));
+  const frameSamples: number[] = [];
+  const innerSamples: number[] = [];
+  for (let y = 0; y < height; y += 3) {
+    for (let x = 0; x < width; x += 3) {
+      const L = luma[y * width + x];
+      const onFrame = x < frameBand || x >= width - frameBand || y < frameBand || y >= height - frameBand;
+      (onFrame ? frameSamples : innerSamples).push(L);
+    }
+  }
+  const frameMed =
+    frameSamples.length > 0 ? quickPercentile(Float32Array.from(frameSamples).sort(), 0.5) : p50;
+  const innerMed =
+    innerSamples.length > 0 ? quickPercentile(Float32Array.from(innerSamples).sort(), 0.5) : p50;
+  const darkBedFrame = frameMed + 40 < innerMed;
+  const surfaceP50 = darkBedFrame ? innerMed : p50;
+  const shortSide = Math.min(width, height);
+  const smallCrop = shortSide < 500;
+
+  // Physical scores per class (0..1). Small sheet children need stronger text
+  // evidence before they can be called CARD_BACK (nameplates look like lines).
+  const backStroke = smallCrop ? strokeDensity > 0.13 : strokeDensity > 0.095;
+  const backLines = smallCrop ? rowTransitions >= 16 : rowTransitions >= 10;
   const physScores: Record<CardSurfaceProfile, number> = {
     CARD_BACK:
-      (strokeDensity > 0.095 ? 0.38 : 0.05) +
-      (rowTransitions >= 10 ? 0.34 : 0) +
-      (bimodalRatio > 0.48 || (p85 - p15 > 135 && meanChroma < 28) ? 0.28 : 0),
-    DARK_ACETATE_FOIL: p50 < 66 ? 0.82 : p50 < 82 ? 0.42 : 0.05,
+      (backStroke ? 0.32 : 0.04) +
+      (backLines ? 0.34 : 0) +
+      (bimodalRatio > 0.48 || (p85 - p15 > 135 && meanChroma < 28) ? 0.24 : 0) -
+      (smallCrop && !backLines ? 0.18 : 0),
+    DARK_ACETATE_FOIL: surfaceP50 < 66 ? 0.82 : surfaceP50 < 82 ? 0.42 : 0.05,
     CHROME_FOIL:
       (specularTail > 32 && p99 > 214 ? 0.45 : 0.1) +
       (glareRatio > 0.13 ? 0.28 : 0) +
       (shimmerRatio > 0.045 ? 0.27 : 0),
     MATTE_RELIC:
-      (specularTail <= 28 && glareRatio <= 0.11 && p50 >= 66 ? 0.65 : 0.2) +
+      (specularTail <= 28 && glareRatio <= 0.11 && surfaceP50 >= 66 ? 0.65 : 0.2) +
       (shimmerRatio <= 0.035 ? 0.2 : 0),
   };
 
@@ -1391,15 +1453,42 @@ async function classifyCardSurface(
     try {
       const thumb = downsampleNearest(img, 336, 16);
       const sem = await semanticFn(thumb.rgba, thumb.width, thumb.height);
-      for (const key of [
-        "CARD_BACK",
-        "DARK_ACETATE_FOIL",
-        "CHROME_FOIL",
-        "MATTE_RELIC",
-      ] as const) {
-        const clipProb = finite(sem[key], -1);
-        if (clipProb >= 0) {
-          physScores[key] = clipProb * 0.62 + physScores[key] * 0.38;
+      const clipAvailable = (["CARD_BACK", "DARK_ACETATE_FOIL", "CHROME_FOIL", "MATTE_RELIC"] as const).some(
+        (key) => finite(sem[key], -1) >= 0,
+      );
+      if (clipAvailable) {
+        const clipWeight = smallCrop ? 0.74 : 0.66;
+        const physWeight = 1 - clipWeight;
+        for (const key of [
+          "CARD_BACK",
+          "DARK_ACETATE_FOIL",
+          "CHROME_FOIL",
+          "MATTE_RELIC",
+        ] as const) {
+          const clipProb = finite(sem[key], -1);
+          if (clipProb >= 0) {
+            physScores[key] = clipProb * clipWeight + physScores[key] * physWeight;
+          }
+        }
+        // Do not let a weak physical CARD_BACK default win on a small crop when CLIP prefers a front.
+        if (smallCrop) {
+          let clipBest: CardSurfaceProfile = "MATTE_RELIC";
+          let clipBestVal = -1;
+          for (const key of [
+            "CARD_BACK",
+            "DARK_ACETATE_FOIL",
+            "CHROME_FOIL",
+            "MATTE_RELIC",
+          ] as const) {
+            const v = finite(sem[key], -1);
+            if (v > clipBestVal) {
+              clipBestVal = v;
+              clipBest = key;
+            }
+          }
+          if (clipBest !== "CARD_BACK" && clipBestVal >= 0.28 && physScores.CARD_BACK >= physScores[clipBest]) {
+            physScores[clipBest] = Math.max(physScores[clipBest], physScores.CARD_BACK + 0.08);
+          }
         }
       }
     } catch {
