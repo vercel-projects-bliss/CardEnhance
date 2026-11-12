@@ -412,6 +412,15 @@ function softmax(logits: number[]): number[] {
   return exps.map((v) => v / sum);
 }
 
+function bindSharedOrtRuntime(): void {
+  configureOrtWasm();
+  // transformers.js uses this symbol if present, instead of initializing its
+  // nested onnxruntime-web@1.22-dev (which tries to import() a cross-origin
+  // jsep.mjs from the CDN and fails in the classic enhance worker).
+  const key = Symbol.for("onnxruntime");
+  Object.defineProperty(globalThis, key, { value: ort, configurable: true });
+}
+
 function configureTransformersEnv(env: typeof import("@huggingface/transformers").env): void {
   // Bundled workers can look like Node (stubbed fs/path) and then fail looking for local models.
   env.allowLocalModels = false;
@@ -421,8 +430,12 @@ function configureTransformersEnv(env: typeof import("@huggingface/transformers"
   env.useFSCache = false;
   const onnx = env.backends.onnx as { wasm?: { wasmPaths?: string; numThreads?: number; proxy?: boolean; simd?: boolean } };
   onnx.wasm = onnx.wasm ?? {};
-  // transformers.js 3.8.1 vendors onnxruntime-web 1.22.0-dev — do not point it at /ort (1.21.0).
-  onnx.wasm.wasmPaths = TRANSFORMERS_ORT_WASM;
+  // If we successfully bound the app's 1.21 runtime, keep serving /ort/.
+  // Only fall back to the 1.22-dev CDN if transformers still has no paths.
+  if (!onnx.wasm.wasmPaths) {
+    const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+    onnx.wasm.wasmPaths = origin ? `${origin}/ort/` : TRANSFORMERS_ORT_WASM;
+  }
   onnx.wasm.numThreads = 1;
   onnx.wasm.proxy = false;
   onnx.wasm.simd = true;
@@ -447,13 +460,15 @@ function toFloatEmbed(raw: unknown): Float32Array {
 
 async function loadClipEncoder(modelId: string): Promise<ClipHandle> {
   installWorkerWindowShim();
+  bindSharedOrtRuntime();
   const transformers = await import("@huggingface/transformers");
   configureTransformersEnv(transformers.env);
 
   const tokenizer = await transformers.AutoTokenizer.from_pretrained(modelId);
   const processor = await transformers.AutoProcessor.from_pretrained(modelId);
-  const textModel = await transformers.CLIPTextModelWithProjection.from_pretrained(modelId, { dtype: "q8" });
-  const visionModel = await transformers.CLIPVisionModelWithProjection.from_pretrained(modelId, { dtype: "q8" });
+  const clipOpts = { dtype: "q8" as const, device: "wasm" as const };
+  const textModel = await transformers.CLIPTextModelWithProjection.from_pretrained(modelId, clipOpts);
+  const visionModel = await transformers.CLIPVisionModelWithProjection.from_pretrained(modelId, clipOpts);
 
   const allPrompts = [...CLASS_PROMPT_ENTRIES.map((e) => e.prompt), UPRIGHT_PROMPT, INVERTED_PROMPT];
   const textInputs = tokenizer(allPrompts, { padding: true, truncation: true });
