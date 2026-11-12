@@ -506,9 +506,13 @@ async function processOne(
         orientationDetected: target.orientationDetected,
       });
       ctx.pixels.set(id, { source: cropBlob });
-      await finishCard(id, extra.filename, extra, settings, ctx);
     }
+    // Insert first so finishCard's patchScan can find the new rows. Patching
+    // before insert was a no-op and left children stuck on "enhancing".
     if (extras.length) ctx.insertScans(target.id, extras);
+    for (let i = 1; i < cards.length; i++) {
+      await finishCard(extras[i - 1].id, extras[i - 1].name, cards[i], settings, ctx);
+    }
   } catch (err) {
     ctx.patchScan(target.id, {
       status: "failed",
