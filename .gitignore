@@ -20,3 +20,10 @@ yolo11n.pt
 .node_modules.lock
 .codex/coordination/*
 !.codex/coordination/project.yaml
+# next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+# wrangler local state (do not commit)
+.wrangler/
