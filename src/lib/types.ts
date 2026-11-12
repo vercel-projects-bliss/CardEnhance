@@ -55,12 +55,72 @@ export type LibrarySummary = {
   auditCount: number;
 };
 
+
+export type CardSide = "front" | "back" | "unknown";
+
+export type CropEngine = "yolo26" | "yolo" | "card" | "contour" | null;
+
+export type OcrEngine = "vision" | "ocr" | "filename" | "paddleocr" | "paddleocr-vl";
+
+export type CardIdentity = {
+  player: string | null;
+  year: number | null;
+  manufacturer: string | null;
+  set: string | null;
+  number: string | null;
+  parallel: string | null;
+  side: CardSide;
+  confidence: number;
+  rawText: string;
+  engine?: OcrEngine;
+};
+
+export type ScanStatus = "idle" | "queued" | "processing" | "completed" | "failed";
+
+export type ChromeFoilMetrics = {
+  isChromeFoil: boolean;
+  specularRatio: number;
+  specularPeakRatio: number;
+  metallicContrast: number;
+};
+
+export type EnhanceAudit = {
+  filename: string;
+  inputWidth: number;
+  inputHeight: number;
+  outputWidth: number;
+  outputHeight: number;
+  isChromeFoil: boolean;
+  specularRatio: number;
+  specularPeakRatio: number;
+  metallicContrast: number;
+  settings: StudioSettings;
+  sharpnessBefore: number;
+  sharpnessAfter: number;
+  sharpnessDelta: number;
+  timestamp: string;
+};
+
 export type LocalScan = {
   id: string;
   name: string;
   url: string;
+  originalUrl: string;
   width: number;
   height: number;
+  inputWidth: number;
+  inputHeight: number;
   selected: boolean;
+  status: ScanStatus;
+  error?: string;
+  stage?: string;
   sharpnessDelta: number | null;
+  sharpnessBefore?: number | null;
+  sharpnessAfter?: number | null;
+  isChromeFoil?: boolean | null;
+  specularRatio?: number | null;
+  specularPeakRatio?: number | null;
+  metallicContrast?: number | null;
+  processedAt?: string | null;
+  settingsUsed?: StudioSettings | null;
 };

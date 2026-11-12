@@ -7,18 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.510.0",
     "next": "16.4.6",
+    "onnxruntime-web": "^1.21.0",
     "pg": "^8.23.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "tesseract.js": "^5.1.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
+    "@types/jszip": "^3.4.0",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
@@ -26,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }
