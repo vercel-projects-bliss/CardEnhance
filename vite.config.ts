@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -11,6 +11,35 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+
+
+/** Copy PGLite WASM assets next to the server bundle after Nitro finishes.
+ *  Must not use Nitro's `compiled` hook — that would replace the Vercel
+ *  preset hook that writes config.json / .vc-config.json.
+ */
+function copyPgliteAssetsPlugin(): Plugin {
+  return {
+    name: "copy-pglite-assets",
+    apply: "build",
+    closeBundle() {
+      const srcDir = join(process.cwd(), "node_modules/@electric-sql/pglite/dist");
+      const destDirs = [
+        join(process.cwd(), ".vercel/output/functions/__server.func"),
+        join(process.cwd(), ".output/server"),
+      ].filter(existsSync);
+      if (destDirs.length === 0) return;
+      for (const name of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+        const src = join(srcDir, name);
+        if (!existsSync(src)) {
+          throw new Error(`PGlite asset missing: ${src}`);
+        }
+        for (const destDir of destDirs) {
+          copyFileSync(src, join(destDir, name));
+        }
+      }
+    },
+  };
+}
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -172,12 +201,18 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "cloudflare-module",
+            // Vercel sets VERCEL=1 during its build. Keep Cloudflare as the
+            // local/non-Vercel default (Hyperdrive / Workers path).
+            preset: process.env.VERCEL ? "vercel" : "cloudflare-module",
+            // A split SSR server bundle leaves circular createSsrRpc imports
+            // uninitialized at runtime (TypeError on every request).
+            inlineDynamicImports: true,
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
           }),
+          copyPgliteAssetsPlugin(),
         ]
       : []),
     viteReact(),
