@@ -22,6 +22,22 @@ export type Rotation = 0 | 90 | 180 | 270;
 
 export type CardClass = "chrome_foil_front" | "matte_paper_front" | "card_back";
 
+export type CardSurfaceProfile =
+  | "CARD_BACK"
+  | "CHROME_FOIL"
+  | "DARK_ACETATE_FOIL"
+  | "MATTE_RELIC";
+
+export type AppliedParams = {
+  descratch: number;
+  denoise: number;
+  sharpen: number;
+  contrast: number;
+  blackPointLiftFix?: number;
+  highlightRecovery?: number;
+  scale?: number;
+};
+
 export type AdaptiveStats = {
   sharpness: number;
   noiseFloor: number;
@@ -128,7 +144,12 @@ export type EnhanceAudit = {
   isLandscape: boolean;
   orientationUncertain: boolean;
   ocrWordCount: number;
+  profile?: CardSurfaceProfile | null;
+  appliedParams?: AppliedParams | null;
+  orientationSource?: string | null;
+  orientationConfidence?: number | null;
 };
+
 
 export type LocalScan = {
   id: string;
@@ -166,4 +187,9 @@ export type LocalScan = {
   previewUrl?: string;
   orientationUncertain?: boolean;
   ocrWordCount?: number;
+  profile?: CardSurfaceProfile | null;
+  appliedParams?: AppliedParams | null;
+  orientationSource?: string | null;
+  orientationConfidence?: number | null;
 };
+

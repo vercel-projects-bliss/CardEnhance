@@ -1,7 +1,8 @@
-import type { AdaptiveStats, CardClass, StudioSettings } from "./types";
-import type { EnhanceResult } from "./enhance-math";
+import type { AdaptiveAuditMetrics, AdaptivePipelineOptions } from "./adaptiveCardPipeline";
+import type { EnhanceWorkerRequest, EnhanceWorkerResponse, SheetCardOutput } from "../workers/enhance.worker";
+import type { StudioSettings } from "./types";
 
-export type EnhanceOk = EnhanceResult;
+export type SheetEnhanceCard = SheetCardOutput;
 
 function spawnEnhanceWorker() {
   return new Worker(new URL("../workers/enhance.worker.ts", import.meta.url), {
@@ -9,46 +10,48 @@ function spawnEnhanceWorker() {
   });
 }
 
-function runOnWorker(
-  worker: Worker,
-  image: ImageData,
+function settingsToOptions(
   settings: StudioSettings,
-  ocrWordCount = 0,
-): Promise<EnhanceOk> {
+  manualRotationDeg?: AdaptivePipelineOptions["manualRotationDeg"],
+): AdaptivePipelineOptions {
+  return {
+    mode: settings.adaptive ? "adaptive" : "manual",
+    scale: settings.scale,
+    descratch: settings.descratch,
+    onlyChromeDescratch: settings.descratchFoilOnly,
+    denoise: settings.denoise,
+    sharpen: settings.sharpen,
+    contrast: settings.contrast,
+    manualRotationDeg: manualRotationDeg ?? null,
+  };
+}
+
+function requestId(): string {
+  return crypto.randomUUID();
+}
+
+function postAndWait(
+  worker: Worker,
+  request: EnhanceWorkerRequest,
+  transfer: Transferable[] = [],
+  timeoutMs = 180000,
+): Promise<EnhanceWorkerResponse> {
   return new Promise((resolve, reject) => {
-    const id = crypto.randomUUID();
     const timer = setTimeout(() => {
       worker.removeEventListener("message", onMessage);
       worker.removeEventListener("error", onError);
       reject(new Error("Enhance timed out"));
-    }, 90000);
-    const onMessage = (event: MessageEvent) => {
-      if (event.data.id !== id) return;
+    }, timeoutMs);
+    const onMessage = (event: MessageEvent<EnhanceWorkerResponse>) => {
+      if (!event.data || event.data.id !== request.id) return;
       clearTimeout(timer);
       worker.removeEventListener("message", onMessage);
       worker.removeEventListener("error", onError);
-      if (event.data.error) {
-        reject(new Error(event.data.error));
+      if (event.data.type === "card.enhance.error") {
+        reject(new Error(event.data.error.message));
         return;
       }
-      const data = new Uint8ClampedArray(event.data.buffer);
-      resolve({
-        data,
-        width: event.data.width,
-        height: event.data.height,
-        chromeFoil: {
-          isChromeFoil: event.data.isChromeFoil,
-          specularRatio: event.data.specularRatio,
-          specularPeakRatio: event.data.specularPeakRatio,
-          metallicContrast: event.data.metallicContrast,
-        },
-        sharpnessBefore: event.data.sharpnessBefore,
-        sharpnessAfter: event.data.sharpnessAfter,
-        sharpnessDelta: event.data.sharpnessDelta,
-        cardClass: event.data.cardClass as CardClass | undefined,
-        adaptiveStats: event.data.adaptiveStats as AdaptiveStats | undefined,
-        chosenParams: event.data.chosenParams as StudioSettings | undefined,
-      });
+      resolve(event.data);
     };
     const onError = (err: ErrorEvent) => {
       clearTimeout(timer);
@@ -58,19 +61,16 @@ function runOnWorker(
     };
     worker.addEventListener("message", onMessage);
     worker.addEventListener("error", onError);
-    const copy = new Uint8ClampedArray(image.data);
-    worker.postMessage(
-      {
-        id,
-        width: image.width,
-        height: image.height,
-        buffer: copy.buffer,
-        settings,
-        ocrWordCount,
-      },
-      [copy.buffer],
-    );
+    worker.postMessage(request, transfer);
   });
+}
+
+function cloneImage(image: ImageData): { image: ImageData; buffer: ArrayBuffer } {
+  const copy = new Uint8ClampedArray(image.data);
+  return {
+    image: new ImageData(copy, image.width, image.height),
+    buffer: copy.buffer,
+  };
 }
 
 export function defaultPoolSize() {
@@ -82,6 +82,7 @@ export function createEnhancePool(size = defaultPoolSize()) {
   const n = Math.max(1, Math.min(4, Math.round(size) || 1));
   const idle: Worker[] = Array.from({ length: n }, spawnEnhanceWorker);
   const waiters: Array<(worker: Worker) => void> = [];
+  const ready = new WeakSet<Worker>();
   let closed = false;
 
   function acquire(): Promise<Worker> {
@@ -101,23 +102,95 @@ export function createEnhancePool(size = defaultPoolSize()) {
     else idle.push(worker);
   }
 
+  async function ensureReady(worker: Worker) {
+    if (ready.has(worker)) return;
+    await postAndWait(
+      worker,
+      { type: "card.initModels", id: requestId() },
+      [],
+      180000,
+    );
+    ready.add(worker);
+  }
+
+  async function withWorker<T>(fn: (worker: Worker) => Promise<T>, retries = 1): Promise<T> {
+    let last: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const worker = await acquire();
+      try {
+        const result = await fn(worker);
+        release(worker);
+        return result;
+      } catch (err) {
+        last = err;
+        worker.terminate();
+        if (!closed) release(spawnEnhanceWorker());
+      }
+    }
+    throw last instanceof Error ? last : new Error("Enhance failed");
+  }
+
   return {
     size: n,
-    async enhance(image: ImageData, settings: StudioSettings, retries = 1, ocrWordCount = 0): Promise<EnhanceOk> {
-      let last: unknown;
-      for (let attempt = 0; attempt <= retries; attempt++) {
-        const worker = await acquire();
-        try {
-          const result = await runOnWorker(worker, image, settings, ocrWordCount);
-          release(worker);
-          return result;
-        } catch (err) {
-          last = err;
-          worker.terminate();
-          if (!closed) release(spawnEnhanceWorker());
+    async initModels(): Promise<void> {
+      // Warm every idle worker so the first batch does not serialize downloads.
+      await Promise.all(
+        idle.map(async (worker) => {
+          try {
+            await ensureReady(worker);
+          } catch {
+            // Pipeline still runs on heuristics if models are blocked.
+          }
+        }),
+      );
+    },
+    async sheetEnhance(
+      image: ImageData,
+      settings: StudioSettings,
+      manualRotationDeg?: AdaptivePipelineOptions["manualRotationDeg"],
+    ): Promise<SheetEnhanceCard[]> {
+      return withWorker(async (worker) => {
+        await ensureReady(worker);
+        const payload = cloneImage(image);
+        const response = await postAndWait(
+          worker,
+          {
+            type: "sheet.enhance",
+            id: requestId(),
+            image: payload.image,
+            options: settingsToOptions(settings, manualRotationDeg),
+          },
+          [payload.buffer],
+        );
+        if (response.type !== "sheet.enhance.result") {
+          throw new Error("Unexpected sheet enhance response");
         }
-      }
-      throw last instanceof Error ? last : new Error("Enhance failed");
+        return response.cards;
+      });
+    },
+    async cardEnhance(
+      image: ImageData,
+      settings: StudioSettings,
+      manualRotationDeg?: AdaptivePipelineOptions["manualRotationDeg"],
+    ): Promise<{ image: ImageData; audit: AdaptiveAuditMetrics }> {
+      return withWorker(async (worker) => {
+        await ensureReady(worker);
+        const payload = cloneImage(image);
+        const response = await postAndWait(
+          worker,
+          {
+            type: "card.enhance",
+            id: requestId(),
+            image: payload.image,
+            options: settingsToOptions(settings, manualRotationDeg),
+          },
+          [payload.buffer],
+        );
+        if (response.type !== "card.enhance.result") {
+          throw new Error("Unexpected card enhance response");
+        }
+        return { image: response.image, audit: response.audit };
+      });
     },
     terminate() {
       closed = true;

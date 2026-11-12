@@ -1,110 +1,185 @@
-import { classifyCard, mapAdaptiveParams, measureAdaptiveStats } from "../lib/classify";
-import { processEnhance, type ScaleFn } from "../lib/enhance-math";
-import type { StudioSettings } from "../lib/types";
+// src/workers/enhance.worker.ts
+/// <reference lib="webworker" />
 
-type InMsg = {
-  id: string;
-  width: number;
-  height: number;
-  buffer: ArrayBuffer;
-  settings: StudioSettings;
-  ocrWordCount?: number;
-};
+import {
+  runAdaptiveCardPipeline,
+  splitMultiCardSheet,
+  type AdaptiveAuditMetrics,
+  type AdaptivePipelineOptions,
+  type CardVisionAdapters,
+} from "../lib/adaptiveCardPipeline";
+import {
+  createOnnxCardVisionAdapters,
+  type OnnxVisionModelUrls,
+} from "../lib/onnxCardVision";
 
-async function highQualityScale(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-): Promise<Uint8ClampedArray> {
-  const source = new ImageData(new Uint8ClampedArray(src), srcW, srcH);
-  const steps: Array<{ w: number; h: number }> = [];
-  let w = srcW;
-  let h = srcH;
-  // Multi-step upsample (no more than 2× per hop) then a final exact size.
-  while (w * 2 < dstW || h * 2 < dstH) {
-    w = Math.min(dstW, w * 2);
-    h = Math.min(dstH, h * 2);
-    steps.push({ w, h });
-  }
-  if (w !== dstW || h !== dstH) steps.push({ w: dstW, h: dstH });
+export type EnhanceWorkerRequestId = string | number;
+export type EnhanceWorkerOptions = Omit<AdaptivePipelineOptions, keyof CardVisionAdapters>;
 
-  let current = source;
-  for (const step of steps) {
-    try {
-      const bmp = await createImageBitmap(current, {
-        resizeWidth: step.w,
-        resizeHeight: step.h,
-        resizeQuality: "high",
-      } as ImageBitmapOptions);
-      const canvas = new OffscreenCanvas(step.w, step.h);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("OffscreenCanvas unavailable");
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(bmp, 0, 0, step.w, step.h);
-      bmp.close();
-      current = ctx.getImageData(0, 0, step.w, step.h);
-    } catch {
-      const canvas = new OffscreenCanvas(step.w, step.h);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("OffscreenCanvas unavailable");
-      const tmp = new OffscreenCanvas(current.width, current.height);
-      const tctx = tmp.getContext("2d");
-      if (!tctx) throw new Error("OffscreenCanvas unavailable");
-      tctx.putImageData(current, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(tmp, 0, 0, step.w, step.h);
-      current = ctx.getImageData(0, 0, step.w, step.h);
+export type EnhanceWorkerRequest =
+  | {
+      type: "card.initModels";
+      id: EnhanceWorkerRequestId;
+      urls?: OnnxVisionModelUrls;
     }
-  }
-  return current.data;
+  | {
+      type: "card.enhance";
+      id: EnhanceWorkerRequestId;
+      image: ImageData;
+      options?: EnhanceWorkerOptions;
+    }
+  | {
+      type: "sheet.enhance";
+      id: EnhanceWorkerRequestId;
+      image: ImageData;
+      options?: EnhanceWorkerOptions;
+    };
+
+export interface SheetCardOutput {
+  index: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  image: ImageData;
+  audit: AdaptiveAuditMetrics;
 }
 
-const ctx = self as unknown as {
-  onmessage: ((event: MessageEvent<InMsg>) => void) | null;
-  postMessage: (message: unknown, transfer?: Transferable[]) => void;
-};
+export type EnhanceWorkerResponse =
+  | { type: "card.initModels.ready"; id: EnhanceWorkerRequestId }
+  | {
+      type: "card.enhance.result";
+      id: EnhanceWorkerRequestId;
+      image: ImageData;
+      audit: AdaptiveAuditMetrics;
+    }
+  | {
+      type: "sheet.enhance.result";
+      id: EnhanceWorkerRequestId;
+      cards: SheetCardOutput[];
+    }
+  | {
+      type: "card.enhance.error";
+      id: EnhanceWorkerRequestId;
+      error: { name: string; message: string };
+    };
 
-const scaleFn: ScaleFn = highQualityScale;
+const workerScope = self as unknown as DedicatedWorkerGlobalScope;
+let visionAdapters: CardVisionAdapters = {};
+let initPromise: Promise<void> | null = null;
 
-ctx.onmessage = (event: MessageEvent<InMsg>) => {
-  const { id, width, height, buffer, settings, ocrWordCount } = event.data;
-  const src = new Uint8ClampedArray(buffer);
-  const classified = classifyCard(src, width, height, { ocrWordCount: ocrWordCount ?? 0 });
-  const adaptiveStats = measureAdaptiveStats(src, width, height);
-  const chosen = mapAdaptiveParams(adaptiveStats, classified.cardClass, settings);
-  processEnhance(src, width, height, chosen, scaleFn, {
-    cardClass: classified.cardClass,
-    edgeProtect: 0.05,
-  })
-    .then((result) => {
-      ctx.postMessage(
-        {
-          id,
-          width: result.width,
-          height: result.height,
-          buffer: result.data.buffer,
-          isChromeFoil: classified.cardClass === "chrome_foil_front",
-          specularRatio: result.chromeFoil.specularRatio,
-          specularPeakRatio: result.chromeFoil.specularPeakRatio,
-          metallicContrast: result.chromeFoil.metallicContrast,
-          sharpnessBefore: result.sharpnessBefore,
-          sharpnessAfter: result.sharpnessAfter,
-          sharpnessDelta: result.sharpnessDelta,
-          cardClass: classified.cardClass,
-          adaptiveStats,
-          chosenParams: chosen,
-        },
-        [result.data.buffer],
-      );
-    })
-    .catch((err: unknown) => {
-      ctx.postMessage({
-        id,
-        error: err instanceof Error ? err.message : "Enhance failed",
+/** Optional hook to register main's existing OCR tiebreaker inside the worker. */
+export function setEnhanceWorkerDependencies(extra: Partial<CardVisionAdapters>): void {
+  visionAdapters = { ...visionAdapters, ...extra };
+}
+
+async function ensureModelsLoaded(urls?: OnnxVisionModelUrls): Promise<void> {
+  if (!initPromise) {
+    initPromise = createOnnxCardVisionAdapters(urls)
+      .then((loaded) => {
+        // Keep any explicitly injected adapters (e.g. ocrOrientationScore) while adding ONNX models
+        visionAdapters = { ...loaded, ...visionAdapters };
+      })
+      .catch(() => {
+        // Offline / blocked CDN fallback: pipeline still runs deterministic heuristics cleanly
       });
-    });
+  }
+  await initPromise;
+}
+
+async function handleMessage(request: EnhanceWorkerRequest): Promise<void> {
+  try {
+    if (!request || typeof request !== "object") {
+      throw new TypeError("Invalid worker request.");
+    }
+
+    if (request.type === "card.initModels") {
+      await ensureModelsLoaded(request.urls);
+      const ready: EnhanceWorkerResponse = {
+        type: "card.initModels.ready",
+        id: request.id,
+      };
+      workerScope.postMessage(ready);
+      return;
+    }
+
+    if (!request.image || !(request.image.data instanceof Uint8ClampedArray)) {
+      throw new TypeError("request.image must be ImageData.");
+    }
+
+    await ensureModelsLoaded();
+
+    if (request.type === "card.enhance") {
+      const result = await runAdaptiveCardPipeline(
+        request.image.data,
+        request.image.width,
+        request.image.height,
+        { ...request.options, ...visionAdapters },
+      );
+      const pixels = new Uint8ClampedArray(result.rgba) as Uint8ClampedArray<ArrayBuffer>;
+      const image = new ImageData(pixels, result.width, result.height);
+      const response: EnhanceWorkerResponse = {
+        type: "card.enhance.result",
+        id: request.id,
+        image,
+        audit: result.audit,
+      };
+      workerScope.postMessage(response, [image.data.buffer]);
+      return;
+    }
+
+    if (request.type === "sheet.enhance") {
+      // 1. Split 1x2 / 2x2 / 2x3 / 3x3 flatbed sheets into individual card crops FIRST
+      const slices = splitMultiCardSheet(
+        request.image.data,
+        request.image.width,
+        request.image.height,
+      );
+
+      const cards: SheetCardOutput[] = [];
+      const transferables: ArrayBuffer[] = [];
+
+      // 2. Orient, classify, and adaptively restore each split card independently
+      for (const slice of slices) {
+        const result = await runAdaptiveCardPipeline(
+          slice.rgba,
+          slice.width,
+          slice.height,
+          { ...request.options, ...visionAdapters },
+        );
+        const pixels = new Uint8ClampedArray(result.rgba) as Uint8ClampedArray<ArrayBuffer>;
+        const image = new ImageData(pixels, result.width, result.height);
+        cards.push({
+          index: slice.index,
+          bounds: slice.bounds,
+          image,
+          audit: result.audit,
+        });
+        transferables.push(image.data.buffer);
+      }
+
+      const response: EnhanceWorkerResponse = {
+        type: "sheet.enhance.result",
+        id: request.id,
+        cards,
+      };
+      workerScope.postMessage(response, transferables);
+      return;
+    }
+
+    throw new TypeError("Unsupported worker request type.");
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    const reqId =
+      request && typeof request === "object" && "id" in request ? request.id : "unknown";
+    const response: EnhanceWorkerResponse = {
+      type: "card.enhance.error",
+      id: reqId,
+      error: { name: error.name, message: error.message },
+    };
+    workerScope.postMessage(response);
+  }
+}
+
+// Serialize jobs inside each worker instance to cap peak WebGPU/WASM memory on 100+ card batches
+let queue: Promise<void> = Promise.resolve();
+workerScope.onmessage = (event: MessageEvent<EnhanceWorkerRequest>): void => {
+  queue = queue.then(() => handleMessage(event.data));
 };

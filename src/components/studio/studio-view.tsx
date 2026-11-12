@@ -12,10 +12,15 @@ import {
   expandFiles,
   imageDataFromBlob,
   previewBlob,
-  revokeUrl,
   zipBlobs,
 } from "@/lib/files";
-import { enhancePrepared, prepareScan } from "@/lib/process-scan";
+import {
+  composedManualRotation,
+  encodeProcessed,
+  processSource,
+  profileLabel,
+  profileToCardClass,
+} from "@/lib/process-scan";
 import { composeRotation } from "@/lib/orient";
 import type { EnhanceAudit, LocalScan, Rotation, ScanStatus, StudioSettings } from "@/lib/types";
 
@@ -47,7 +52,10 @@ export function StudioView() {
   const urlsRef = useRef<string[]>([]);
   const pixelsRef = useRef(new Map<string, PixelRecord>());
   const scansRef = useRef<LocalScan[]>([]);
-  scansRef.current = scans;
+
+  useEffect(() => {
+    scansRef.current = scans;
+  }, [scans]);
 
   useEffect(() => {
     const urls = urlsRef;
@@ -135,6 +143,7 @@ export function StudioView() {
 
     const poolSize = defaultPoolSize();
     const pool = createEnhancePool(poolSize);
+    await pool.initModels();
     let cursor = 0;
     const work = async () => {
       while (cursor < targets.length) {
@@ -187,6 +196,7 @@ export function StudioView() {
     setNotice(null);
     const poolSize = defaultPoolSize();
     const pool = createEnhancePool(poolSize);
+    await pool.initModels();
     let cursor = 0;
     const work = async () => {
       while (cursor < targets.length) {
@@ -264,6 +274,10 @@ export function StudioView() {
         isLandscape: Boolean(scan.isLandscape),
         orientationUncertain: Boolean(scan.orientationUncertain),
         ocrWordCount: scan.ocrWordCount ?? 0,
+        profile: scan.profile ?? null,
+        appliedParams: scan.appliedParams ?? null,
+        orientationSource: scan.orientationSource ?? null,
+        orientationConfidence: scan.orientationConfidence ?? null,
       }));
     if (!rows.length) return;
     const body = JSON.stringify(
@@ -364,7 +378,7 @@ export function StudioView() {
             aria-expanded={railOpen}
             onClick={() => setRailOpen((value) => !value)}
           >
-            <span>// 01 ENHANCEMENT & EXPORT</span>
+            <span>{"// 01 ENHANCEMENT & EXPORT"}</span>
             <ChevronDown
               className={`h-4 w-4 transition-transform ${railOpen ? "rotate-180" : ""}`}
               strokeWidth={1.75}
@@ -420,6 +434,7 @@ export function StudioView() {
   );
 }
 
+
 async function processOne(
   target: LocalScan,
   settings: StudioSettings,
@@ -441,49 +456,46 @@ async function processOne(
   try {
     ctx.patchScan(target.id, { status: "processing", stage: "detecting" });
     const source = await imageDataFromBlob(rec.source);
-    const prepared = await prepareScan(source, target.name, (target.userRotation ?? 0) as Rotation);
-    if (!prepared.length) throw new Error("No card detected");
+    const knownSingle =
+      target.cardIndex != null ||
+      Boolean(target.sourceId && target.sourceId !== target.id);
+    const manual = composedManualRotation(target.orientationDetected, target.userRotation);
+    const cards = await processSource(source, target.name, settings, pool, {
+      mode: knownSingle ? "card" : "sheet",
+      manualRotationDeg: manual,
+    });
+    if (!cards.length) throw new Error("No card detected");
 
     ctx.patchScan(target.id, { stage: "enhancing", sourceId: target.sourceId ?? target.id });
 
-    // Re-running a previously split card should not spawn more tiles.
-    if (target.cardIndex != null && target.cardIndex > 0 && prepared[target.cardIndex]) {
-      await finishPrepared(
-        target.id,
-        target.name,
-        prepared[target.cardIndex],
-        settings,
-        pool,
-        ctx,
-        source.width,
-        source.height,
-      );
-      return;
+    const firstName = cards.length > 1 ? cards[0].filename : target.name;
+    await finishCard(target.id, firstName, cards[0], settings, ctx);
+    if (cards.length > 1) {
+      // Parent tile now represents card 0; store its crop so a later rotate
+      // uses card.enhance on that slice instead of re-splitting the sheet.
+      const cropBlob = await encodePng(cards[0].sourceCrop);
+      const existing = ctx.pixels.get(target.id);
+      ctx.pixels.set(target.id, { source: cropBlob, processed: existing?.processed });
     }
-
-    const first = prepared[0];
-    const firstName = prepared.length > 1 ? first.filename : target.name;
-    await finishPrepared(target.id, firstName, first, settings, pool, ctx, source.width, source.height);
 
     if (ctx.hasChildren(target.id)) return;
 
     const extras: LocalScan[] = [];
-    const extraPrepared: Array<{ id: string; card: (typeof prepared)[number] }> = [];
-    for (let i = 1; i < prepared.length; i++) {
-      const extra = prepared[i];
+    for (let i = 1; i < cards.length; i++) {
+      const extra = cards[i];
       const id = crypto.randomUUID();
-      const preview = await encodePng(extra.image);
-      const url = URL.createObjectURL(preview);
-      ctx.urls.push(url);
+      const cropBlob = await encodePng(extra.sourceCrop);
+      const cropUrl = URL.createObjectURL(cropBlob);
+      ctx.urls.push(cropUrl);
       extras.push({
         id,
         name: extra.filename,
-        url,
-        originalUrl: url,
+        url: cropUrl,
+        originalUrl: cropUrl,
         width: extra.image.width,
         height: extra.image.height,
-        inputWidth: extra.image.width,
-        inputHeight: extra.image.height,
+        inputWidth: extra.sourceCrop.width,
+        inputHeight: extra.sourceCrop.height,
         selected: true,
         status: "processing",
         stage: "enhancing",
@@ -491,14 +503,12 @@ async function processOne(
         sourceId: target.sourceId ?? target.id,
         cardIndex: extra.cardIndex,
         userRotation: target.userRotation ?? 0,
+        orientationDetected: target.orientationDetected,
       });
-      extraPrepared.push({ id, card: extra });
-      ctx.pixels.set(id, { source: rec.source });
+      ctx.pixels.set(id, { source: cropBlob });
+      await finishCard(id, extra.filename, extra, settings, ctx);
     }
     if (extras.length) ctx.insertScans(target.id, extras);
-    for (const item of extraPrepared) {
-      await finishPrepared(item.id, item.card.filename, item.card, settings, pool, ctx, item.card.image.width, item.card.image.height);
-    }
   } catch (err) {
     ctx.patchScan(target.id, {
       status: "failed",
@@ -508,69 +518,64 @@ async function processOne(
   }
 }
 
-async function finishPrepared(
+async function finishCard(
   id: string,
   filename: string,
-  prepared: Awaited<ReturnType<typeof prepareScan>>[number],
+  card: Awaited<ReturnType<typeof processSource>>[number],
   settings: StudioSettings,
-  pool: ReturnType<typeof createEnhancePool>,
   ctx: {
     pixels: Map<string, PixelRecord>;
     urls: string[];
     patchScan: (id: string, partial: Partial<LocalScan>) => void;
   },
-  sourceW: number,
-  sourceH: number,
 ) {
-  const rectified = await encodePng(prepared.image);
-  const rectifiedUrl = URL.createObjectURL(rectified);
-  ctx.urls.push(rectifiedUrl);
-
-  const enhanced = await enhancePrepared(prepared.image, settings, pool, prepared.ocrWordCount ?? 0);
-  ctx.urls.push(enhanced.url);
-  const existing = ctx.pixels.get(id);
-  ctx.pixels.set(id, { source: existing?.source ?? rectified, processed: enhanced.blob });
-
-  const beforePreview = await previewBlob(prepared.image, 360);
+  const encoded = await encodeProcessed(card.image, card.audit);
+  ctx.urls.push(encoded.url);
+  const cropBlob = await encodePng(card.sourceCrop);
+  const beforePreview = await previewBlob(card.sourceCrop, 360);
   const beforeUrl = URL.createObjectURL(beforePreview);
   ctx.urls.push(beforeUrl);
-  revokeUrl(rectifiedUrl);
+  const existing = ctx.pixels.get(id);
+  ctx.pixels.set(id, { source: existing?.source ?? cropBlob, processed: encoded.blob });
 
+  const audit = card.audit;
+  const applied = audit.appliedParams;
   ctx.patchScan(id, {
     name: filename,
-    url: enhanced.previewUrl || enhanced.url,
-    previewUrl: enhanced.previewUrl || enhanced.url,
+    url: encoded.previewUrl || encoded.url,
+    previewUrl: encoded.previewUrl || encoded.url,
     originalUrl: beforeUrl,
-    width: enhanced.width,
-    height: enhanced.height,
-    inputWidth: prepared.image.width,
-    inputHeight: prepared.image.height,
+    width: encoded.width,
+    height: encoded.height,
+    inputWidth: audit.inputSize.width,
+    inputHeight: audit.inputSize.height,
     status: "completed",
     stage: "completed",
     error: undefined,
-    sharpnessDelta: enhanced.sharpnessDelta,
-    sharpnessBefore: enhanced.sharpnessBefore,
-    sharpnessAfter: enhanced.sharpnessAfter,
-    isChromeFoil: enhanced.chromeFoil.isChromeFoil,
-    specularRatio: enhanced.chromeFoil.specularRatio,
-    specularPeakRatio: enhanced.chromeFoil.specularPeakRatio,
-    metallicContrast: enhanced.chromeFoil.metallicContrast,
+    sharpnessDelta: audit.sharpnessDeltaPct,
+    sharpnessBefore: audit.sharpnessBefore,
+    sharpnessAfter: audit.sharpnessAfter,
+    isChromeFoil: audit.isChromeFoil,
     processedAt: new Date().toISOString(),
     settingsUsed: { ...settings },
-    orientationDetected: prepared.orientationDetected,
-    orientationApplied: prepared.orientationApplied,
-    cropQuad: prepared.cropQuad,
-    cropMargin: prepared.cropMargin,
-    isLandscape: prepared.isLandscape,
-    orientationUncertain: prepared.orientationUncertain,
-    ocrWordCount: prepared.ocrWordCount,
-    cardClass: enhanced.cardClass ?? null,
-    adaptiveStats: enhanced.adaptiveStats ?? null,
-    chosenParams: enhanced.chosenParams ?? null,
-    cardIndex: prepared.cardIndex,
+    orientationDetected: audit.appliedRotationDeg,
+    orientationApplied: audit.appliedRotationDeg,
+    isLandscape: audit.isLandscapeCard,
+    orientationUncertain: audit.orientationUncertain,
+    cardClass: profileToCardClass(audit.profile),
+    profile: audit.profile,
+    appliedParams: applied,
+    chosenParams: {
+      ...settings,
+      descratch: applied.descratch,
+      denoise: applied.denoise,
+      sharpen: applied.sharpen,
+      contrast: applied.contrast,
+    },
+    orientationSource: audit.orientationSource,
+    orientationConfidence: audit.orientationConfidence,
+    cardIndex: card.cardIndex,
   });
-  void sourceW;
-  void sourceH;
 }
 
 function pngName(name: string) {
@@ -901,13 +906,14 @@ function ScanGrid({
                       <span className="sr-only">Selected</span>
                     </span>
                   ) : null}
-                  {scan.cardClass ? (
+                  {scan.profile || scan.cardClass ? (
                     <span
                       data-testid="class-badge"
                       data-class={scan.cardClass}
+                      data-profile={scan.profile ?? ""}
                       className="absolute top-2 right-2 z-10 border border-laser/60 bg-background/80 px-1.5 py-0.5 font-mono text-[9px] tracking-wide text-laser"
                     >
-                      {classLabel(scan.cardClass)}
+                      {scan.profile ? profileLabel(scan.profile) : classLabel(scan.cardClass!)}
                     </span>
                   ) : scan.isChromeFoil ? (
                     <span
@@ -959,6 +965,11 @@ function ScanGrid({
                   >
                     sharpness Δ {delta}
                   </p>
+                  {scan.profile ? (
+                    <p data-testid="audit-profile" className="mt-0.5 font-mono text-[9px] text-ink-subtle">
+                      {profileLabel(scan.profile)}
+                    </p>
+                  ) : null}
                   {params ? (
                     <p data-testid="chosen-params" className="mt-0.5 font-mono text-[9px] leading-snug text-ink-subtle">
                       d{params.descratch.toFixed(2)} n{params.denoise.toFixed(2)} s{params.sharpen.toFixed(2)} c
