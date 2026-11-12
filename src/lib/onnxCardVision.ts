@@ -31,27 +31,64 @@ export const DEFAULT_MODEL_URLS: Required<OnnxVisionModelUrls> = {
   clipModelId: "Xenova/clip-vit-base-patch32",
 };
 
+// Git-LFS-backed GitHub copy of the same YuNet blob (CORS *). jsdelivr serves the LFS pointer (131 B), so do not use it.
+const YUNET_FALLBACK_URLS = [
+  "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+];
+
 const MODEL_CACHE_NAME = "cardenhance-onnx-models-v1";
 
-async function fetchCachedModelBytes(url: string): Promise<Uint8Array> {
-  if (typeof caches !== "undefined") {
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function fetchOneModelUrl(url: string, cache?: Cache): Promise<Uint8Array> {
+  if (cache) {
+    const hit = await cache.match(url);
+    if (hit) return new Uint8Array(await hit.arrayBuffer());
+  }
+  const res = await withTimeout(fetch(url, { mode: "cors", redirect: "follow" }), 60000, `model fetch ${url}`);
+  if (!res.ok) throw new Error(`Failed to fetch model ${url}: ${res.status}`);
+  if (cache) {
     try {
-      const cache = await caches.open(MODEL_CACHE_NAME);
-      const hit = await cache.match(url);
-      if (hit) return new Uint8Array(await hit.arrayBuffer());
-      const res = await fetch(url, { mode: "cors" });
-      if (!res.ok) throw new Error(`Failed to fetch model ${url}: ${res.status}`);
       await cache.put(url, res.clone());
-      return new Uint8Array(await res.arrayBuffer());
     } catch {
-      // Fallback to direct fetch if Cache Storage is unavailable in private context
+      // Quota or opaque-redirect cache failures should not block inference.
     }
   }
-  const res = await fetch(url, { mode: "cors" });
-  if (!res.ok) throw new Error(`Failed to fetch model ${url}: ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 }
 
+async function fetchCachedModelBytes(url: string, fallbackUrls: string[] = []): Promise<Uint8Array> {
+  let cache: Cache | undefined;
+  if (typeof caches !== "undefined") {
+    try {
+      cache = await caches.open(MODEL_CACHE_NAME);
+    } catch {
+      cache = undefined;
+    }
+  }
+  const candidates = [url, ...fallbackUrls];
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return await fetchOneModelUrl(candidate, cache);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to fetch model ${url}`);
+}
 
 function configureOrtWasm(): void {
   const scope = globalThis as unknown as { location?: { origin?: string } };
@@ -66,23 +103,42 @@ function configureOrtWasm(): void {
   ort.env.wasm.proxy = false;
 }
 
+async function webGpuAdapterAvailable(): Promise<boolean> {
+  const gpu = (globalThis as unknown as { navigator?: { gpu?: { requestAdapter?: () => Promise<unknown> } } })
+    .navigator?.gpu;
+  if (!gpu?.requestAdapter) return false;
+  try {
+    const adapter = await withTimeout(gpu.requestAdapter(), 2000, "webgpu requestAdapter");
+    return Boolean(adapter);
+  } catch {
+    return false;
+  }
+}
+
 async function createBestSession(modelBytes: Uint8Array): Promise<OrtSession> {
   configureOrtWasm();
-  const hasWebGpu = typeof navigator !== "undefined" && "gpu" in navigator;
-  if (hasWebGpu) {
+  const wasmOptions = {
+    executionProviders: ["wasm"] as const,
+    graphOptimizationLevel: "all" as const,
+  };
+  // Only attempt WebGPU when an adapter actually appears. Passing "webgpu" (even
+  // with a WASM fallback in the same list) can hang indefinitely on SwiftShader /
+  // headless Vulkan instead of throwing.
+  if (await webGpuAdapterAvailable()) {
     try {
-      return await ort.InferenceSession.create(modelBytes, {
-        executionProviders: ["webgpu", "wasm"],
-        graphOptimizationLevel: "all",
-      });
+      return await withTimeout(
+        ort.InferenceSession.create(modelBytes, {
+          executionProviders: ["webgpu"],
+          graphOptimizationLevel: "all",
+        }),
+        8000,
+        "webgpu session",
+      );
     } catch {
-      // Fallback cleanly to WASM
+      // Fall through to WASM
     }
   }
-  return ort.InferenceSession.create(modelBytes, {
-    executionProviders: ["wasm"],
-    graphOptimizationLevel: "all",
-  });
+  return ort.InferenceSession.create(modelBytes, wasmOptions);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +283,12 @@ export async function createOnnxCardVisionAdapters(
     null;
 
   const [yunetBytes, docBytes] = await Promise.all([
-    cfg.yunetFaceUrl ? fetchCachedModelBytes(cfg.yunetFaceUrl).catch(() => null) : null,
+    cfg.yunetFaceUrl
+      ? fetchCachedModelBytes(
+          cfg.yunetFaceUrl,
+          cfg.yunetFaceUrl === DEFAULT_MODEL_URLS.yunetFaceUrl ? YUNET_FALLBACK_URLS : [],
+        ).catch(() => null)
+      : null,
     cfg.docOriUrl ? fetchCachedModelBytes(cfg.docOriUrl).catch(() => null) : null,
   ]);
 
@@ -262,6 +323,8 @@ export async function createOnnxCardVisionAdapters(
       "MATTE_RELIC",
   };
   const PROMPT_LABELS = Object.keys(CARD_PROMPTS);
+
+  await ensureClip();
 
   return {
     scoreUprightFace: yunetSession

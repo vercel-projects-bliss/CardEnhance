@@ -34,7 +34,7 @@ function postAndWait(
   worker: Worker,
   request: EnhanceWorkerRequest,
   transfer: Transferable[] = [],
-  timeoutMs = 180000,
+  timeoutMs = 300000,
 ): Promise<EnhanceWorkerResponse> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -108,7 +108,7 @@ export function createEnhancePool(size = defaultPoolSize()) {
       worker,
       { type: "card.initModels", id: requestId() },
       [],
-      180000,
+      300000,
     );
     ready.add(worker);
   }
@@ -133,13 +133,23 @@ export function createEnhancePool(size = defaultPoolSize()) {
   return {
     size: n,
     async initModels(): Promise<void> {
-      // Warm every idle worker so the first batch does not serialize downloads.
+      // Load models on one worker first so the others reuse Cache Storage
+      // instead of racing four CLIP / ONNX downloads.
+      const workers = [...idle];
+      const first = workers.shift();
+      if (first) {
+        try {
+          await ensureReady(first);
+        } catch (err) {
+          console.warn("ONNX model init failed; continuing with heuristic fallback.", err);
+        }
+      }
       await Promise.all(
-        idle.map(async (worker) => {
+        workers.map(async (worker) => {
           try {
             await ensureReady(worker);
-          } catch {
-            // Pipeline still runs on heuristics if models are blocked.
+          } catch (err) {
+            console.warn("ONNX model init failed on a pool worker; heuristic fallback.", err);
           }
         }),
       );
