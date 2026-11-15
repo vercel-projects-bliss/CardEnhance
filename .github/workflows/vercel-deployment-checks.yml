@@ -1,0 +1,48 @@
+name: Vercel Deployment Checks
+
+# GitHub runs repository_dispatch workflows from the default branch only.
+# This file will not run until it is merged to main.
+on:
+  repository_dispatch:
+    types:
+      - vercel.deployment.ready
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      statuses: write
+    steps:
+      # Official status action: main step marks pending, post step reports
+      # job status automatically. `state` is not an action input.
+      - name: Notify Vercel
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: "Vercel Deployment Checks | ${{ github.event.client_payload.project.name }} (${{ github.event.client_payload.environment }})"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout deployed SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.git.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # `npm run build` also runs db:migrate; skip migrate in this check.
+      - name: Build
+        run: npx vite build
