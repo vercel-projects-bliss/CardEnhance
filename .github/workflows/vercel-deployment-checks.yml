@@ -7,26 +7,40 @@ on:
     types:
       - vercel.deployment.ready
 
+permissions: {}
+
 jobs:
-  checks:
+  pending:
     runs-on: ubuntu-latest
     permissions:
-      actions: read
-      contents: read
       statuses: write
+    # Status writers must never check out or execute deployment-controlled code.
     steps:
-      # Official status action: main step marks pending, post step reports
-      # job status automatically. `state` is not an action input.
-      - name: Notify Vercel
-        uses: vercel/repository-dispatch/actions/status@v1
+      - name: Mark checks pending
+        uses: actions/github-script@v7
         with:
-          name: "Vercel Deployment Checks | ${{ github.event.client_payload.project.name }} (${{ github.event.client_payload.environment }})"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const payload = context.payload.client_payload;
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: payload.git.sha,
+              state: 'pending',
+              context: `Vercel Deployment Checks | ${payload.project.name} (${payload.environment})`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
 
+  checks:
+    needs: pending
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
       - name: Checkout deployed SHA
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.client_payload.git.sha }}
+          # npm lifecycle scripts and checks are controlled by the preview SHA.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -49,3 +63,29 @@ jobs:
       # `npm run build` also runs db:migrate; skip migrate in this check.
       - name: Build
         run: npx vite build
+
+  report:
+    needs: [pending, checks]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    # Use only GitHub's job result, never artifacts or output from preview code.
+    steps:
+      - name: Report check result
+        uses: actions/github-script@v7
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+        with:
+          script: |
+            const payload = context.payload.client_payload;
+            const result = process.env.CHECKS_RESULT;
+            const state = result === 'success' ? 'success'
+              : result === 'failure' ? 'failure' : 'error';
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: payload.git.sha,
+              state,
+              context: `Vercel Deployment Checks | ${payload.project.name} (${payload.environment})`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
