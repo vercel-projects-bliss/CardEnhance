@@ -5,6 +5,7 @@ import { PageEmpty, PageError, PagePending } from "@/components/studio/page-stat
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listStoredCards, type StoredCard } from "@/lib/connectors/persist";
+import { errorMessage } from "@/lib/error-message";
 
 export const Route = createFileRoute("/library/")({
   loader: () => listStoredCards(),
@@ -15,7 +16,7 @@ export const Route = createFileRoute("/library/")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/library">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: LibraryPage,
