@@ -14,6 +14,7 @@ import { listStoredCards } from "@/lib/connectors/persist";
 import { testNotify } from "@/lib/connectors/notify";
 import { probeR2 } from "@/lib/connectors/r2";
 import { cn } from "@/lib/utils";
+import { errorMessage } from "@/lib/error-message";
 
 export const Route = createFileRoute("/connectors")({
   loader: async () => {
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/connectors")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/connectors">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: ConnectorsPage,

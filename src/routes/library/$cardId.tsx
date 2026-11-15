@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Toaster } from "@/components/ui/sonner";
 import { getStoredCard, updateStoredCard, type StoredCard } from "@/lib/connectors/persist";
 import { lookupCardPrices, type PriceQuote } from "@/lib/prices";
+import { errorMessage } from "@/lib/error-message";
 
 export const Route = createFileRoute("/library/$cardId")({
   loader: async ({ params }) => {
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/library/$cardId")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/library">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   notFoundComponent: () => (
