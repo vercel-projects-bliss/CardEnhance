@@ -50,12 +50,9 @@ test("withExplicitSslMode leaves verify-full/disable/allow and unknown modes alo
   );
 });
 
-test("withExplicitSslMode adds verify-full when sslmode is missing", () => {
-  assert.equal(withExplicitSslMode(SAMPLE), `${SAMPLE}?sslmode=verify-full`);
-  assert.equal(
-    withExplicitSslMode(`${SAMPLE}?connect_timeout=10`),
-    `${SAMPLE}?connect_timeout=10&sslmode=verify-full`,
-  );
+test("withExplicitSslMode leaves URLs without sslmode unchanged (local non-TLS)", () => {
+  assert.equal(withExplicitSslMode(SAMPLE), SAMPLE);
+  assert.equal(withExplicitSslMode(`${SAMPLE}?connect_timeout=10`), `${SAMPLE}?connect_timeout=10`);
 });
 
 test("withExplicitSslMode does not rewrite userinfo (password encoding stays put)", () => {

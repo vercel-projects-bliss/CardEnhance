@@ -45,7 +45,9 @@ const ALIAS_MODES = new Set(["require", "prefer", "verify-ca"]);
 const LEAVE_ALONE = new Set(["verify-full", "disable", "allow"]);
 
 /**
- * Return a connection string whose `sslmode` is explicit.
+ * Return a connection string whose `sslmode` is explicit when it was one of
+ * the modes pg currently aliases to verify-full. URLs with no sslmode are
+ * left unchanged so local/non-TLS Postgres keeps working.
  * Mutates only the sslmode query param so userinfo encoding is untouched.
  *
  * @param {string} connectionString
@@ -57,8 +59,7 @@ export function withExplicitSslMode(connectionString) {
   }
   const match = connectionString.match(/([?&])sslmode=([^&]*)/i);
   if (!match || match.index === undefined) {
-    const sep = connectionString.includes("?") ? "&" : "?";
-    return `${connectionString}${sep}sslmode=verify-full`;
+    return connectionString;
   }
   let current = match[2];
   try {
