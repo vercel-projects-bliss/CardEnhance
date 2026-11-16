@@ -7,6 +7,7 @@
 import { pathToFileURL } from "node:url";
 
 export const COMMENT_MARKER = "<!-- grok-pr-review -->";
+export const REVIEW_BOT_LOGIN = "github-actions[bot]";
 export const MAX_DIFF_CHARS = 80_000;
 export const MAX_REVIEW_CHARS = 8_000;
 export const XAI_MODEL = "grok-4-fast";
@@ -187,18 +188,35 @@ export async function reviewWithFallback(env, messages) {
 }
 
 /**
+ * Only the Actions bot's own review is upserted. A human comment that quotes
+ * the public marker must not be selected for PATCH.
+ *
+ * @param {unknown} comment
+ */
+export function isOwnReviewComment(comment) {
+  if (!comment || typeof comment !== "object") return false;
+  const record = /** @type {{ body?: unknown, user?: { login?: unknown } }} */ (comment);
+  if (typeof record.body !== "string") return false;
+  if (!record.body.trimStart().startsWith(COMMENT_MARKER)) return false;
+  return record.user?.login === REVIEW_BOT_LOGIN;
+}
+
+/**
+ * @param {unknown} comments
+ */
+export function findOwnReviewComment(comments) {
+  if (!Array.isArray(comments)) return undefined;
+  return comments.find(isOwnReviewComment);
+}
+
+/**
  * @param {{ repo: string, pr: number, token: string, body: string }} args
  */
 export async function upsertPrComment({ repo, pr, token, body }) {
   const comments = await githubRequest(`/repos/${repo}/issues/${pr}/comments?per_page=100`, {
     token,
   });
-  const existing = Array.isArray(comments)
-    ? comments.find(
-        (comment) =>
-          typeof comment?.body === "string" && comment.body.includes(COMMENT_MARKER),
-      )
-    : undefined;
+  const existing = findOwnReviewComment(comments);
 
   if (existing?.id) {
     await githubRequest(`/repos/${repo}/issues/comments/${existing.id}`, {

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   COMMENT_MARKER,
   capDiff,
+  findOwnReviewComment,
   formatComment,
   hasSecret,
   secretsPresent,
@@ -47,4 +48,19 @@ test("summarizeHttpError never dumps a long body", () => {
   });
   assert.match(summary, /^HTTP 401/);
   assert.ok(summary.length < 220);
+});
+
+test("findOwnReviewComment ignores contributor quotes of the marker", () => {
+  const quoted = {
+    id: 1,
+    user: { login: "alice" },
+    body: `See this marker ${COMMENT_MARKER} in a discussion`,
+  };
+  const bot = {
+    id: 2,
+    user: { login: "github-actions[bot]" },
+    body: formatComment("Looks fine.", "Grok / grok-4-fast"),
+  };
+  assert.equal(findOwnReviewComment([quoted, bot])?.id, 2);
+  assert.equal(findOwnReviewComment([quoted]), undefined);
 });
