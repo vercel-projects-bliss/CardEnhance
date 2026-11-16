@@ -69,6 +69,16 @@ test("vite.config keeps the createSsrRpc Nitro workaround", () => {
   assert.match(source, /createSsrRpc/);
 });
 
+test("CSP allows Google Fonts used by Fraunces and IBM Plex", () => {
+  const config = JSON.parse(readFileSync(join(projectRoot(), "vercel.json"), "utf8"));
+  const csp = config.headers
+    ?.flatMap((entry) => entry.headers ?? [])
+    .find((header) => header.key === "Content-Security-Policy")?.value;
+  assert.ok(csp, "vercel.json must set Content-Security-Policy");
+  assert.match(csp, /style-src[^;]*https:\/\/fonts\.googleapis\.com/);
+  assert.match(csp, /font-src[^;]*https:\/\/fonts\.gstatic\.com/);
+});
+
 test("rewriting sslmode=require does not emit the pg SECURITY WARNING", async () => {
   const execFileAsync = promisify(execFile);
   const script = `
