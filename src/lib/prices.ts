@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import type { CardIdentity } from "./types";
 
 export type PriceListing = {
@@ -170,6 +171,7 @@ function parseEbaySold(html: string, identity: Partial<CardIdentity>): PriceList
 }
 
 export const lookupCardPrices = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((data: { identity: Partial<CardIdentity> }) => {
     if (!data?.identity) throw new Error("Missing identity");
     return data;

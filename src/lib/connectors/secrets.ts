@@ -1,15 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import { parseCredentialText, SECRET_FIELDS, snapshotSecrets } from "./secret-fields";
 
 export { SECRET_FIELDS };
 
-export const listSecrets = createServerFn({ method: "GET" }).handler(async () => {
+export const listSecrets = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const { applySecrets } = await import("./secrets-io");
   const map = await applySecrets();
   return snapshotSecrets(map);
 });
 
 export const saveSecrets = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: { values?: Record<string, string>; paste?: string }) => input)
   .handler(async ({ data }) => {
     const { applySecrets, persistSecrets, readSecretMap } = await import("./secrets-io");

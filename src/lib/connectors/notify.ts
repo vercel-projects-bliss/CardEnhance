@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import { getSql } from "@/lib/db";
 
 function slackToken() {
@@ -53,6 +54,7 @@ async function dispatch(text: string) {
 }
 
 export const notifyCardProcessed = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: { cardName: string; detector?: string; engine?: string }) => input)
   .handler(async ({ data }) => {
     const text = `Card processed: ${data.cardName}${data.detector ? ` (${data.detector})` : ""}`;
@@ -60,6 +62,7 @@ export const notifyCardProcessed = createServerFn({ method: "POST" })
   });
 
 export const testNotify = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: { cardName: string }) => input)
   .handler(async ({ data }) => {
     const name = data.cardName.trim();

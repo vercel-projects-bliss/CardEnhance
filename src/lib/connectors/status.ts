@@ -1,9 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import { getDbSource, getSql } from "@/lib/db";
 
 export type ConnectorStatus = "connected" | "pglite" | "disconnected" | "error";
 
-export const checkConnectors = createServerFn({ method: "GET" }).handler(async () => {
+export const checkConnectors = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const { applySecrets } = await import("./secrets-io");
   await applySecrets();
   const statuses: Record<string, ConnectorStatus> = {

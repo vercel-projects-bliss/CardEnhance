@@ -220,6 +220,18 @@ export default defineConfig(({ command, isPreview }) => ({
             // Vercel sets VERCEL=1 during its build. Keep Cloudflare as the
             // local/non-Vercel default (Hyperdrive / Workers path).
             preset: process.env.VERCEL ? "vercel" : "cloudflare-module",
+            routeRules: {
+              "/**": {
+                headers: {
+                  "x-content-type-options": "nosniff",
+                  "referrer-policy": "strict-origin-when-cross-origin",
+                  "permissions-policy": "camera=(), microphone=(), geolocation=()",
+                  "strict-transport-security":
+                    "max-age=31536000; includeSubDomains; preload",
+                  "x-dns-prefetch-control": "off",
+                },
+              },
+            },
             // A split SSR server bundle leaves circular createSsrRpc imports
             // uninitialized at runtime (TypeError on every request).
             inlineDynamicImports: true,

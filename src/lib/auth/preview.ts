@@ -10,15 +10,16 @@
  * injection. When deployed the deployer injects a per-app
  * `GROK_AUTH_*` that overrides these (see `server.ts`).
  *
- * These MUST equal the broker's `GROK_PREVIEW_CLIENT_ID` /
- * `GROK_PREVIEW_CLIENT_SECRET` (set in the broker's Vercel env; the broker stores
- * only the secret's `base64url(SHA-256)` hash). This is a dedicated, low-privilege
- * client (preview-only, `*.grok-sandbox.com`) — rotate it by regenerating the
- * broker env var and this constant together.
+ * The preview client id is public. The matching client secret MUST come from
+ * env (`GROK_AUTH_CLIENT_SECRET` on deploy, or `GROK_PREVIEW_CLIENT_SECRET`
+ * for sandbox). Never bake the secret into source — it is a credential.
  */
 export const PREVIEW_CLIENT_ID = "grok_preview";
+
+/** Preview/broker client secret from env only. Empty means federated auth is off. */
 export const PREVIEW_CLIENT_SECRET =
-  "8bcdb7fc5a33874ad933ca568918d5790388a0795e44c4d1dea691f801b17ec5";
+  (typeof process !== "undefined" && process.env.GROK_PREVIEW_CLIENT_SECRET?.trim()) ||
+  "";
 
 /** The shared auth broker issuer (OIDC discovery lives under it). */
 export const GROK_ISSUER_DEFAULT = "https://auth.grok.me";
