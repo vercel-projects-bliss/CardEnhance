@@ -12,31 +12,47 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
-
 /** Copy PGLite WASM assets next to the server bundle after Nitro finishes.
  *  Must not use Nitro's `compiled` hook — that would replace the Vercel
  *  preset hook that writes config.json / .vc-config.json.
  */
 function copyPgliteAssetsPlugin(): Plugin {
+  const copy = () => {
+    const srcDir = join(process.cwd(), "node_modules/@electric-sql/pglite/dist");
+    const destDirs = [
+      join(process.cwd(), ".vercel/output/functions/__server.func"),
+      join(process.cwd(), ".output/server"),
+    ].filter(existsSync);
+    if (destDirs.length === 0) return false;
+    for (const name of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+      const src = join(srcDir, name);
+      if (!existsSync(src)) {
+        throw new Error(`PGlite asset missing: ${src}`);
+      }
+      for (const destDir of destDirs) {
+        copyFileSync(src, join(destDir, name));
+      }
+    }
+    return true;
+  };
   return {
     name: "copy-pglite-assets",
     apply: "build",
-    closeBundle() {
-      const srcDir = join(process.cwd(), "node_modules/@electric-sql/pglite/dist");
-      const destDirs = [
-        join(process.cwd(), ".vercel/output/functions/__server.func"),
-        join(process.cwd(), ".output/server"),
-      ].filter(existsSync);
-      if (destDirs.length === 0) return;
-      for (const name of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
-        const src = join(srcDir, name);
-        if (!existsSync(src)) {
-          throw new Error(`PGlite asset missing: ${src}`);
+    enforce: "post",
+    closeBundle: {
+      sequential: true,
+      order: "post",
+      async handler() {
+        if (copy()) return;
+        // Nitro's Vercel preset writes `__server.func` during its own closeBundle.
+        // A parallel hook would see no dest dir and skip the copy (ENOENT at
+        // runtime). Wait briefly for that directory, then give up — Vercel
+        // production uses Neon and does not boot PGLite.
+        for (const delay of [50, 150, 400]) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (copy()) return;
         }
-        for (const destDir of destDirs) {
-          copyFileSync(src, join(destDir, name));
-        }
-      }
+      },
     },
   };
 }

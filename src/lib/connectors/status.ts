@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { dbSource, getSql } from "@/lib/db";
+import { getDbSource, getSql } from "@/lib/db";
 
 export type ConnectorStatus = "connected" | "pglite" | "disconnected" | "error";
 
@@ -21,7 +21,7 @@ export const checkConnectors = createServerFn({ method: "GET" }).handler(async (
   try {
     const sql = await getSql();
     await sql`select 1 as ok`;
-    statuses.neon = dbSource === "neon" ? "connected" : "pglite";
+    statuses.neon = getDbSource() === "neon" ? "connected" : "pglite";
   } catch {
     statuses.neon = "error";
   }
