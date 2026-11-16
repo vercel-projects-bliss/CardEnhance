@@ -4,7 +4,8 @@ import { createMiddleware } from "@tanstack/react-start";
  * Reject scripted cross-site / sibling-tenant calls to server functions.
  *
  * Vercel Authentication can still gate the deployment; this closes CSRF and
- * same-site cookie riding that SSO does not. Import isolation.server only
+ * same-site cookie riding that SSO does not. Mutating methods require
+ * `Sec-Fetch-Site: same-origin` or a matching Origin/Host pair. Import isolation.server only
  * inside the server hook so Vite does not ship AsyncLocalStorage to the
  * browser (see `middleware.ts`).
  *

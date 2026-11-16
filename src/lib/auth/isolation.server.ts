@@ -1,4 +1,5 @@
 import { getRequest } from "@tanstack/react-start/server";
+import { isSameSiteRequestAllowed } from "../../../scripts/same-site-request.mjs";
 
 /**
  * Fetch-Metadata sibling isolation — **server-only** (`.server.ts` suffix).
@@ -14,13 +15,11 @@ import { getRequest } from "@tanstack/react-start/server";
  * (fetch/XHR/form-POST) request to this app's server functions and ride this
  * app's session cookie.
  *
- * We allow only: same-origin requests (this app's own client), non-browser
- * requests (SSR / server-to-server, which send no `Sec-Fetch-Site`), and
- * top-level GET navigations (how the OAuth callback and normal page loads
- * arrive). Every cross-site / same-site *scripted* request is rejected.
- * Together with `__Host-` cookies and Better Auth's `trustedOrigins`, this
- * closes the sibling-tenant attack surface. Enforced at the `authMiddleware`
- * chokepoint (see `middleware.ts`).
+ * Safe methods (GET/HEAD/OPTIONS) allow missing `Sec-Fetch-Site` so SSR and
+ * server-to-server reads still work. Mutating methods require `same-origin`
+ * Fetch Metadata or a matching `Origin`/`Host` pair — a missing header is
+ * not treated as trusted. Enforced at the `authMiddleware` / `csrfMiddleware`
+ * chokepoints.
  */
 export class CrossSiteRequestError extends Error {
   readonly status = 403;
@@ -35,18 +34,13 @@ export function assertSameSiteRequest(): void {
   const request = getRequest();
   if (!request) return; // no request context (e.g. build) — nothing to guard
   const h = request.headers;
-  const site = h.get("sec-fetch-site");
-  // Non-browser client (no header), the app's own origin, or a direct
-  // (address-bar/bookmark) load are all fine.
-  if (!site || site === "same-origin" || site === "none") return;
-  // A top-level GET navigation (e.g. the broker's OAuth callback redirect) is
-  // fine even when it's cross-site; scripted requests never set navigate mode.
-  const dest = h.get("sec-fetch-dest");
-  const isTopLevelGet =
-    h.get("sec-fetch-mode") === "navigate" &&
-    request.method === "GET" &&
-    dest !== "object" &&
-    dest !== "embed";
-  if (isTopLevelGet) return;
-  throw new CrossSiteRequestError();
+  const allowed = isSameSiteRequestAllowed({
+    method: request.method,
+    secFetchSite: h.get("sec-fetch-site"),
+    secFetchMode: h.get("sec-fetch-mode"),
+    secFetchDest: h.get("sec-fetch-dest"),
+    origin: h.get("origin"),
+    host: h.get("x-forwarded-host") ?? h.get("host"),
+  });
+  if (!allowed) throw new CrossSiteRequestError();
 }

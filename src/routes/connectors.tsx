@@ -128,8 +128,8 @@ function ConnectorsPage() {
       <div>
         <h1 className="font-display text-2xl">Connectors</h1>
         <p className="text-sm text-muted">
-          Upload keys here. They are written into this workspace and applied immediately. They are not committed. {count}{" "}
-          cards in{" "}
+          Upload keys for local development. They stay in this workspace and are not committed. On Vercel, set secrets in
+          Project Settings → Environment Variables instead. {count} cards in{" "}
           <Link to="/library" className="text-accent hover:underline">
             library
           </Link>

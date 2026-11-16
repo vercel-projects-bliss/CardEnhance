@@ -17,6 +17,8 @@ export const saveSecrets = createServerFn({ method: "POST" })
   .validator((input: { values?: Record<string, string>; paste?: string }) => input)
   .handler(async ({ data }) => {
     const { applySecrets, persistSecrets, readSecretMap } = await import("./secrets-io");
+    const { assertSecretsWritable } = await import("../../../scripts/secrets-persist.mjs");
+    assertSecretsWritable();
     const current = await readSecretMap();
     const incoming: Record<string, string> = { ...(data.values ?? {}) };
     Object.assign(incoming, parseCredentialText(data.paste ?? ""));
