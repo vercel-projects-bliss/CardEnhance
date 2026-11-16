@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { projectRoot } from "./with-app-env.mjs";
-import { readDatabaseUrl, shouldUsePglite, withExplicitSslMode } from "./postgres-url.mjs";
+import {
+  isLocalPostgresHost,
+  readDatabaseUrl,
+  shouldUsePglite,
+  withExplicitSslMode,
+} from "./postgres-url.mjs";
 
 const SAMPLE = "postgres://card:s3cret@ep-example.us-east-1.aws.neon.tech/neondb";
 
@@ -50,9 +55,27 @@ test("withExplicitSslMode leaves verify-full/disable/allow and unknown modes alo
   );
 });
 
-test("withExplicitSslMode leaves URLs without sslmode unchanged (local non-TLS)", () => {
-  assert.equal(withExplicitSslMode(SAMPLE), SAMPLE);
-  assert.equal(withExplicitSslMode(`${SAMPLE}?connect_timeout=10`), `${SAMPLE}?connect_timeout=10`);
+test("withExplicitSslMode defaults remote URLs without sslmode to verify-full", () => {
+  assert.equal(isLocalPostgresHost(SAMPLE), false);
+  assert.equal(withExplicitSslMode(SAMPLE), `${SAMPLE}?sslmode=verify-full`);
+  assert.equal(
+    withExplicitSslMode(`${SAMPLE}?connect_timeout=10`),
+    `${SAMPLE}?connect_timeout=10&sslmode=verify-full`,
+  );
+});
+
+test("withExplicitSslMode leaves local URLs without sslmode unchanged", () => {
+  const local = "postgres://card:s3cret@localhost/neondb";
+  assert.equal(isLocalPostgresHost(local), true);
+  assert.equal(withExplicitSslMode(local), local);
+  assert.equal(
+    withExplicitSslMode(`${local}?connect_timeout=10`),
+    `${local}?connect_timeout=10`,
+  );
+  assert.equal(
+    withExplicitSslMode("postgres://u:p@127.0.0.1:5432/db"),
+    "postgres://u:p@127.0.0.1:5432/db",
+  );
 });
 
 test("withExplicitSslMode does not rewrite userinfo (password encoding stays put)", () => {

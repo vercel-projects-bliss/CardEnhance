@@ -43,11 +43,29 @@ export function shouldUsePglite(env = process.env) {
  */
 const ALIAS_MODES = new Set(["require", "prefer", "verify-ca"]);
 const LEAVE_ALONE = new Set(["verify-full", "disable", "allow"]);
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /**
- * Return a connection string whose `sslmode` is explicit when it was one of
- * the modes pg currently aliases to verify-full. URLs with no sslmode are
- * left unchanged so local/non-TLS Postgres keeps working.
+ * Local Postgres (loopback) may run without TLS. Remote hosts must not inherit
+ * pg's plaintext default when sslmode is omitted.
+ *
+ * @param {string} connectionString
+ * @returns {boolean}
+ */
+export function isLocalPostgresHost(connectionString) {
+  try {
+    const parsed = new URL(connectionString.replace(/^postgres(ql)?:/i, "http:"));
+    return LOCAL_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Return a connection string whose `sslmode` is explicit.
+ * - Missing sslmode on a remote host → verify-full (do not allow plaintext).
+ * - Missing sslmode on localhost → unchanged (local/non-TLS still works).
+ * - require/prefer/verify-ca → verify-full (today's pg alias, without the warning).
  * Mutates only the sslmode query param so userinfo encoding is untouched.
  *
  * @param {string} connectionString
@@ -59,7 +77,9 @@ export function withExplicitSslMode(connectionString) {
   }
   const match = connectionString.match(/([?&])sslmode=([^&]*)/i);
   if (!match || match.index === undefined) {
-    return connectionString;
+    if (isLocalPostgresHost(connectionString)) return connectionString;
+    const sep = connectionString.includes("?") ? "&" : "?";
+    return `${connectionString}${sep}sslmode=verify-full`;
   }
   let current = match[2];
   try {
