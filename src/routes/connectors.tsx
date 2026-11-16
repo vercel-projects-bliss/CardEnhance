@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { PageShell } from "@/components/studio/app-nav";
 import { PageError, PagePending } from "@/components/studio/page-states";
+import { errorMessage } from "@/lib/error-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/connectors")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/connectors">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: ConnectorsPage,
