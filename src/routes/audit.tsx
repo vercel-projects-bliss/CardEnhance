@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageShell } from "@/components/studio/app-nav";
 import { PageEmpty, PageError, PagePending } from "@/components/studio/page-states";
 import { listAuditLogs, type AuditRow } from "@/lib/connectors/persist";
+import { errorMessage } from "@/lib/error-message";
 
 export const Route = createFileRoute("/audit")({
   loader: () => listAuditLogs(),
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/audit")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/audit">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: AuditPage,

@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 
-export const checkR2 = createServerFn({ method: "GET" }).handler(async () => {
+export const checkR2 = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const { applySecrets } = await import("./secrets-io");
   await applySecrets();
   const { r2Config, headBucket } = await import("./r2-io");
@@ -15,6 +18,7 @@ export const checkR2 = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export const putR2Object = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: { key: string; contentType: string; dataBase64: string; cardId?: string }) => input)
   .handler(async ({ data }) => {
     const { applySecrets } = await import("./secrets-io");
@@ -45,7 +49,9 @@ export const putR2Object = createServerFn({ method: "POST" })
     return { ok: result.ok, skipped: false as const, key: result.key, url: result.url, error: result.error };
   });
 
-export const probeR2 = createServerFn({ method: "POST" }).handler(async () => {
+export const probeR2 = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const { applySecrets } = await import("./secrets-io");
   await applySecrets();
   const { r2Config, putObject, getObject, headBucket } = await import("./r2-io");

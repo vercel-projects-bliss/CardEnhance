@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import type { CardIdentity, CardSide } from "./types";
 
 export type VisionOcrResult =
@@ -80,6 +81,7 @@ function parseVisionJson(text: string): Partial<CardIdentity> | null {
 }
 
 export const readTradingCard = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((data: { jpeg: string }) => {
     if (!data || typeof data.jpeg !== "string" || data.jpeg.length < 32) {
       throw new Error("Missing image");

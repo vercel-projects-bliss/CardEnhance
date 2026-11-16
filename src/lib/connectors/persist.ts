@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import { getSql } from "@/lib/db";
 
 export type StoredCard = {
@@ -97,6 +98,7 @@ const CARD_SELECT = `
 `;
 
 export const saveProcessedCard = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: PersistInput) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
@@ -139,7 +141,9 @@ export const saveProcessedCard = createServerFn({ method: "POST" })
     return { ok: true as const, id: data.id };
   });
 
-export const listStoredCards = createServerFn({ method: "GET" }).handler(async () => {
+export const listStoredCards = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const sql = await getSql();
   const rows = await sql.query<CardRow>(
     `select ${CARD_SELECT} from cards order by created_at desc limit 100`,
@@ -148,6 +152,7 @@ export const listStoredCards = createServerFn({ method: "GET" }).handler(async (
 });
 
 export const getStoredCard = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
   .validator((input: { id: string }) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
@@ -156,6 +161,7 @@ export const getStoredCard = createServerFn({ method: "GET" })
   });
 
 export const updateStoredCard = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: CardPatch) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
@@ -199,7 +205,9 @@ export const updateStoredCard = createServerFn({ method: "POST" })
     return { ok: true as const, card };
   });
 
-export const listAuditLogs = createServerFn({ method: "GET" }).handler(async () => {
+export const listAuditLogs = createServerFn({ method: "GET" })
+  .middleware([csrfMiddleware])
+  .handler(async () => {
   const sql = await getSql();
   const rows = await sql<{
     id: number;

@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { csrfMiddleware } from "@/lib/auth/csrf-middleware";
 import type { CardIdentity, CardSide } from "./types";
 
 export type PaddleVlResult =
@@ -102,6 +103,7 @@ async function callHf(jpeg: string): Promise<PaddleVlResult> {
 }
 
 export const readPaddleVl = createServerFn({ method: "POST" })
+  .middleware([csrfMiddleware])
   .validator((input: { jpeg: string }) => input)
   .handler(async ({ data }): Promise<PaddleVlResult> => {
     try {

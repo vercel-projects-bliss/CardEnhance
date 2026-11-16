@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { PageShell } from "@/components/studio/app-nav";
 import { PageError, PagePending } from "@/components/studio/page-states";
+import { errorMessage } from "@/lib/error-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/connectors")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/connectors">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: ConnectorsPage,
@@ -127,8 +128,8 @@ function ConnectorsPage() {
       <div>
         <h1 className="font-display text-2xl">Connectors</h1>
         <p className="text-sm text-muted">
-          Upload keys here. They are written into this workspace and applied immediately. They are not committed. {count}{" "}
-          cards in{" "}
+          Upload keys for local development. They stay in this workspace and are not committed. On Vercel, set secrets in
+          Project Settings → Environment Variables instead. {count} cards in{" "}
           <Link to="/library" className="text-accent hover:underline">
             library
           </Link>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageShell } from "@/components/studio/app-nav";
 import { PageEmpty, PageError, PagePending } from "@/components/studio/page-states";
+import { errorMessage } from "@/lib/error-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listStoredCards, type StoredCard } from "@/lib/connectors/persist";
@@ -15,7 +16,7 @@ export const Route = createFileRoute("/library/")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/library">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   component: LibraryPage,

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSecretsWritable } from "../../../scripts/secrets-persist.mjs";
 import { SECRET_FIELDS, snapshotSecrets, type SecretMap } from "./secret-fields";
 
 const ROOT = process.cwd();
@@ -7,6 +8,7 @@ const JSON_FILE = join(ROOT, "data", "secrets.json");
 const ENV_FILE = join(ROOT, ".env.local");
 
 export async function readSecretMap(): Promise<SecretMap> {
+  if (process.env.VERCEL) return {};
   try {
     const raw = await readFile(JSON_FILE, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -40,6 +42,7 @@ export async function applySecrets(): Promise<SecretMap> {
 }
 
 export async function persistSecrets(map: SecretMap) {
+  assertSecretsWritable();
   await mkdir(join(ROOT, "data"), { recursive: true });
   await writeFile(JSON_FILE, JSON.stringify(map, null, 2), { mode: 0o600 });
   await writeFile(ENV_FILE, toEnvFile(map), { mode: 0o600 });

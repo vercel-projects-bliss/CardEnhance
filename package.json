@@ -75,6 +75,9 @@
     "zod": "^4.4.0",
     "zustand": "^5.0.0"
   },
+  "optionalDependencies": {
+    "lru-cache": "^11.5.3"
+  },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@types/jszip": "^3.4.0",

@@ -3,6 +3,7 @@ import { createFileRoute, Link, notFound, useRouter } from "@tanstack/react-rout
 import { toast } from "sonner";
 import { PageShell } from "@/components/studio/app-nav";
 import { PageError, PagePending } from "@/components/studio/page-states";
+import { errorMessage } from "@/lib/error-message";
 import { PriceQuoteView } from "@/components/studio/price-quote";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/library/$cardId")({
   ),
   errorComponent: ({ error }) => (
     <PageShell current="/library">
-      <PageError message={error.message} />
+      <PageError message={errorMessage(error)} />
     </PageShell>
   ),
   notFoundComponent: () => (
