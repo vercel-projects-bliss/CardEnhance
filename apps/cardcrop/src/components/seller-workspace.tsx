@@ -84,9 +84,9 @@ export function SellerWorkspace() {
  async function sample() {
   await task('Loading wrestling-card sample…',async () => {
    const files = await Promise.all(['front','back'].map(async side => {
-    const response = await fetch(`/samples/demo-${side}.jpg`);
+    const response = await fetch(`/samples/seller-${side}.jpg`);
     if (!response.ok) throw new Error('Sample image unavailable');
-    return new File([await response.blob()],`demo-${side}.jpg`,{type:'image/jpeg'});
+    return new File([await response.blob()],`mina-shirakawa-dazzlers-${side}.jpg`,{type:'image/jpeg'});
    }));
    await addFiles(files);
   });

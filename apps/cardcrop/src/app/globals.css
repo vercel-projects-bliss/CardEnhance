@@ -210,3 +210,7 @@ textarea { min-height: 7rem; resize: vertical; }
 .seller-fields input, .seller-fields select { width: 100%; min-width: 0; }
 .seller-export { margin: 1.5rem 0; }
 @media(max-width:600px) { .seller .topbar { align-items: flex-start; } .seller-stats { gap: 1rem; } .seller-fields { grid-template-columns: 1fr; } }
+
+.seller-fields input, .seller-fields select { background: #10150c; color: #f0ecdd; border: 1px solid #526236; border-radius: .45rem; padding: .65rem .7rem; min-height: 2.7rem; }
+.seller-fields input:focus-visible, .seller-fields select:focus-visible { outline: 2px solid #c1e27a; outline-offset: 2px; }
+.seller-fields input:disabled, .seller-fields select:disabled { opacity: .65; }
