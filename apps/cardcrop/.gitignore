@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.vercel/
+.env*
+*.tsbuildinfo
+public/ocr/
+
+public/models/
+public/ort/
+public/samples/

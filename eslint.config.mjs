@@ -15,6 +15,8 @@ export default tseslint.config(
       ".nitro/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
+      // The Next.js app runs its own lint configuration and generates local assets.
+      "apps/cardcrop/**",
       // Vendored, minified bundles shipped by tesseract.js and onnxruntime-web.
       // Scoped to those two directories so first-party scripts added elsewhere
       // under public/ stay linted.
